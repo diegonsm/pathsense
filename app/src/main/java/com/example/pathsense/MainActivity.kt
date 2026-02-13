@@ -11,11 +11,17 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -25,6 +31,7 @@ import com.example.pathsense.camera.CameraStreamer
 import com.example.pathsense.core.FrameHub
 import com.example.pathsense.pipelines.PipelineCoordinator
 import com.example.pathsense.pipelines.detection.cocoLabel
+import com.example.pathsense.pipelines.results.DetectionResult
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,10 +86,18 @@ fun AppScreen() {
             return@Column
         }
 
-        CameraPreviewStreaming(
-            modifier = Modifier.weight(1f),
-            hub = hub
-        )
+        // CHANGED: Wrap preview in a Box and draw overlay on top
+        Box(Modifier.weight(1f)) {
+            CameraPreviewStreaming(
+                modifier = Modifier.fillMaxSize(),
+                hub = hub
+            )
+
+            DetectionOverlay(
+                modifier = Modifier.fillMaxSize(),
+                det = det
+            )
+        }
 
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -109,6 +124,35 @@ fun AppScreen() {
     }
 }
 
+// NEW: Draws bounding boxes from DetectionResult on top of the camera preview
+@Composable
+fun DetectionOverlay(
+    modifier: Modifier = Modifier,
+    det: DetectionResult?
+) {
+    Canvas(modifier = modifier) {
+        val detections = det?.detections ?: return@Canvas
+
+        for (d in detections) {
+            // Assumes left/top/right/bottom are normalized [0,1] in preview coordinates.
+            val leftPx = d.left.coerceIn(0f, 1f) * size.width
+            val topPx = d.top.coerceIn(0f, 1f) * size.height
+            val rightPx = d.right.coerceIn(0f, 1f) * size.width
+            val bottomPx = d.bottom.coerceIn(0f, 1f) * size.height
+
+            val w = (rightPx - leftPx).coerceAtLeast(0f)
+            val h = (bottomPx - topPx).coerceAtLeast(0f)
+
+            drawRect(
+                color = Color.Green,
+                topLeft = Offset(leftPx, topPx),
+                size = Size(w, h),
+                style = Stroke(width = 4f)
+            )
+        }
+    }
+}
+
 @Composable
 fun CameraPreviewStreaming(
     modifier: Modifier = Modifier,
@@ -122,6 +166,8 @@ fun CameraPreviewStreaming(
         factory = { ctx ->
             val previewView = PreviewView(ctx)
 
+            previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
+            previewView.scaleType = FIT_CENTER
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
 

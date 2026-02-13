@@ -13,6 +13,13 @@ import kotlin.math.min
 
 class DepthAnythingRunner(private val context: Context) {
 
+    // NEW: lightweight depth representation you can sample later for Near/Med/Far, etc.
+    data class DepthMap( // CHANGED/NEW
+        val width: Int,
+        val height: Int,
+        val closeness: ByteArray // 0..255, where 255 = "closer" (inverted normalized depth) // CHANGED/NEW
+    )
+
     private var env: OrtEnvironment? = null
     private var session: OrtSession? = null
     private var inputName: String = "image"
@@ -28,7 +35,8 @@ class DepthAnythingRunner(private val context: Context) {
         inputName = session!!.inputNames.first()
     }
 
-    fun run(bitmap: Bitmap): Bitmap? {
+    // CHANGED: return DepthMap instead of Bitmap so detection can sample depth efficiently
+    fun run(bitmap: Bitmap): DepthMap? { // CHANGED
         val env = env ?: return null
         val session = session ?: return null
 
@@ -67,9 +75,8 @@ class DepthAnythingRunner(private val context: Context) {
 
                 if (depth2d == null) return null
 
-                val depthBmp = depthToGrayscale(depth2d)
-
-                return Bitmap.createScaledBitmap(depthBmp, bitmap.width, bitmap.height, true)
+                // CHANGED: convert raw depth -> compact closeness map (0..255) for fast ROI sampling
+                return depthToClosenessMap(depth2d) // CHANGED
             }
         }
     }
@@ -100,7 +107,10 @@ class DepthAnythingRunner(private val context: Context) {
         return fb
     }
 
-    private fun depthToGrayscale(depth: Array<FloatArray>): Bitmap {
+    // NEW: convert raw depth (arbitrary scale) to a 0..255 "closeness" map
+    // - normalize depth across the frame
+    // - invert so "closer" becomes higher intensity (255 = closer) to match your previous grayscale viz
+    private fun depthToClosenessMap(depth: Array<FloatArray>): DepthMap { // CHANGED/NEW
         val h = depth.size
         val w = depth[0].size
 
@@ -115,12 +125,27 @@ class DepthAnythingRunner(private val context: Context) {
         }
         val range = (mx - mn).takeIf { it > 1e-6f } ?: 1f
 
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val closeness = ByteArray(w * h) // CHANGED/NEW
+        var idx = 0
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val norm = ((depth[y][x] - mn) / range * 255f).toInt().coerceIn(0, 255)
-                val inv = 255 - norm
-                bmp.setPixel(x, y, Color.rgb(inv, inv, inv))
+                val inv = 255 - norm // closer => higher
+                closeness[idx++] = inv.toByte()
+            }
+        }
+
+        return DepthMap(width = w, height = h, closeness = closeness) // CHANGED/NEW
+    }
+
+    // OPTIONAL helper: if you still want a visualization Bitmap for debug/UI overlay later
+    fun toGrayscaleBitmap(map: DepthMap): Bitmap { // CHANGED/NEW
+        val bmp = Bitmap.createBitmap(map.width, map.height, Bitmap.Config.ARGB_8888)
+        var idx = 0
+        for (y in 0 until map.height) {
+            for (x in 0 until map.width) {
+                val v = map.closeness[idx++].toInt() and 0xFF
+                bmp.setPixel(x, y, Color.rgb(v, v, v))
             }
         }
         return bmp

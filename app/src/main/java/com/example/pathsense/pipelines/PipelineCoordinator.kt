@@ -1,6 +1,7 @@
 package com.example.pathsense.pipelines
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.example.pathsense.core.FrameHub
 import com.example.pathsense.pipelines.depth.DepthAnythingRunner
 import com.example.pathsense.pipelines.detection.MobileNetSsdRunner
@@ -68,8 +69,12 @@ class PipelineCoordinator(
                     lastDepthMs = nowMs
 
                     try {
-                        val viz = depth.run(frame.bitmap)
-                        depthState.value = DepthResult(tsNs = frame.timestampNs, depthViz = viz)
+                        val map = depth.run(frame.bitmap)              // DepthMap?
+                        val viz = map?.let { depth.toGrayscaleBitmap(it) } // Bitmap?
+                        val scaledViz = viz?.let {
+                            Bitmap.createScaledBitmap(it, frame.bitmap.width, frame.bitmap.height, true)
+                        }
+                        depthState.value = DepthResult(tsNs = frame.timestampNs, depthViz = scaledViz)
                     } catch (_: Exception) {}
                 }
             }
