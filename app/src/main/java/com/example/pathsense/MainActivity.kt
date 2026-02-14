@@ -11,168 +11,232 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.pathsense.accessibility.AccessibilityPreferences
+import com.example.pathsense.accessibility.AudioFeedbackManager
+import com.example.pathsense.accessibility.HapticFeedbackManager
 import com.example.pathsense.camera.CameraStreamer
 import com.example.pathsense.core.FrameHub
 import com.example.pathsense.pipelines.PipelineCoordinator
-import com.example.pathsense.pipelines.detection.cocoLabel
-import com.example.pathsense.pipelines.results.DetectionResult
+import com.example.pathsense.ui.screens.MainScreen
+import com.example.pathsense.ui.screens.SettingsScreen
+import com.example.pathsense.ui.theme.PathSenseTheme
+import kotlinx.coroutines.launch
 
+/**
+ * Main activity for PathSense accessible navigation app.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AppScreen() }
+        setContent { PathSenseApp() }
     }
 }
 
+/**
+ * Navigation routes for the app.
+ */
+private object Routes {
+    const val MAIN = "main"
+    const val SETTINGS = "settings"
+}
+
+/**
+ * Root composable for the PathSense app.
+ * Manages accessibility settings, navigation, and camera setup.
+ */
 @Composable
-fun AppScreen() {
+fun PathSenseApp() {
     val context = LocalContext.current
-    val hub = remember { FrameHub() }
     val scope = rememberCoroutineScope()
-    val coordinator = remember {
-        PipelineCoordinator(context.applicationContext, hub, scope)
+    val navController = rememberNavController()
+
+    // Initialize accessibility components
+    val preferences = remember { AccessibilityPreferences(context) }
+    val audioManager = remember { AudioFeedbackManager(context, preferences) }
+    val hapticManager = remember { HapticFeedbackManager(context, preferences) }
+
+    // Collect accessibility preferences for theme
+    val highContrast by preferences.highContrast.collectAsState(initial = false)
+    val largeText by preferences.largeText.collectAsState(initial = false)
+
+    // Local state for theme (allows immediate updates)
+    var localHighContrast by remember { mutableStateOf(false) }
+    var localLargeText by remember { mutableStateOf(false) }
+
+    // Sync local state with preferences
+    LaunchedEffect(highContrast) { localHighContrast = highContrast }
+    LaunchedEffect(largeText) { localLargeText = largeText }
+
+    // Sync haptic enabled state
+    LaunchedEffect(Unit) {
+        preferences.hapticEnabled.collect { enabled ->
+            hapticManager.setEnabled(enabled)
+        }
     }
 
+    // Sync speech settings
+    LaunchedEffect(Unit) {
+        scope.launch {
+            preferences.speechRate.collect { rate ->
+                audioManager.setSpeechRate(rate)
+            }
+        }
+        scope.launch {
+            preferences.speechPitch.collect { pitch ->
+                audioManager.setSpeechPitch(pitch)
+            }
+        }
+    }
+
+    // Cleanup on dispose
+    DisposableEffect(Unit) {
+        onDispose {
+            audioManager.shutdown()
+        }
+    }
+
+    PathSenseTheme(
+        highContrast = localHighContrast,
+        largeText = localLargeText,
+        dynamicColor = !localHighContrast // Disable dynamic color in high contrast mode
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            NavHost(
+                navController = navController,
+                startDestination = Routes.MAIN
+            ) {
+                composable(Routes.MAIN) {
+                    CameraScreen(
+                        preferences = preferences,
+                        audioManager = audioManager,
+                        hapticManager = hapticManager,
+                        onNavigateToSettings = {
+                            navController.navigate(Routes.SETTINGS)
+                        }
+                    )
+                }
+
+                composable(Routes.SETTINGS) {
+                    SettingsScreen(
+                        preferences = preferences,
+                        audioManager = audioManager,
+                        hapticManager = hapticManager,
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        },
+                        onHighContrastChanged = { enabled ->
+                            localHighContrast = enabled
+                        },
+                        onLargeTextChanged = { enabled ->
+                            localLargeText = enabled
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Camera screen with permission handling and pipeline setup.
+ */
+@Composable
+private fun CameraScreen(
+    preferences: AccessibilityPreferences,
+    audioManager: AudioFeedbackManager,
+    hapticManager: HapticFeedbackManager,
+    onNavigateToSettings: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+
+    // Camera permission state
     var granted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                    PackageManager.PERMISSION_GRANTED
+                PackageManager.PERMISSION_GRANTED
         )
     }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted = it }
+    ) { isGranted ->
+        granted = isGranted
+        if (isGranted) {
+            audioManager.announce("Camera ready")
+        }
+    }
 
     LaunchedEffect(Unit) {
-        if (!granted) launcher.launch(Manifest.permission.CAMERA)
-    }
-
-    // start pipelines once permission is granted
-    LaunchedEffect(granted) {
-        if (granted) coordinator.start()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { coordinator.stop() }
-    }
-
-    val ocr by coordinator.ocrState.collectAsState(initial = null)
-    val det by coordinator.detState.collectAsState(initial = null)
-    val depth by coordinator.depthState.collectAsState(initial = null)
-
-    Column(Modifier.fillMaxSize()) {
         if (!granted) {
-            Text(
-                text = "Camera permission required",
-                modifier = Modifier.padding(16.dp)
-            )
-            return@Column
-        }
-
-        // CHANGED: Wrap preview in a Box and draw overlay on top
-        Box(Modifier.weight(1f)) {
-            CameraPreviewStreaming(
-                modifier = Modifier.fillMaxSize(),
-                hub = hub
-            )
-
-            DetectionOverlay(
-                modifier = Modifier.fillMaxSize(),
-                det = det
-            )
-        }
-
-        Column(Modifier.padding(12.dp)) {
-            Text(
-                text = "OCR: ${ocr?.text?.take(120) ?: "..."}",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                text = "Detections: ${det?.numDetections ?: 0}",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                text = "Top: ${
-                    det?.detections?.take(3)?.joinToString {
-                        "${cocoLabel(it.classId)} ${(it.score * 100).toInt()}%"
-                    } ?: "..."
-                }",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                text = "Depth: ${if (depth?.depthViz != null) "viz ready" else "..."}",
-                style = MaterialTheme.typography.bodyMedium
-            )
+            launcher.launch(Manifest.permission.CAMERA)
         }
     }
-}
 
-// NEW: Draws bounding boxes from DetectionResult on top of the camera preview
-@Composable
-fun DetectionOverlay(
-    modifier: Modifier = Modifier,
-    det: DetectionResult?
-) {
-    Canvas(modifier = modifier) {
-        val detections = det?.detections ?: return@Canvas
-
-        for (d in detections) {
-            // Assumes left/top/right/bottom are normalized [0,1] in preview coordinates.
-            val leftPx = d.left.coerceIn(0f, 1f) * size.width
-            val topPx = d.top.coerceIn(0f, 1f) * size.height
-            val rightPx = d.right.coerceIn(0f, 1f) * size.width
-            val bottomPx = d.bottom.coerceIn(0f, 1f) * size.height
-
-            val w = (rightPx - leftPx).coerceAtLeast(0f)
-            val h = (bottomPx - topPx).coerceAtLeast(0f)
-
-            drawRect(
-                color = Color.Green,
-                topLeft = Offset(leftPx, topPx),
-                size = Size(w, h),
-                style = Stroke(width = 4f)
+    if (!granted) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Camera permission required for PathSense to work",
+                modifier = Modifier.padding(16.dp),
+                style = MaterialTheme.typography.bodyLarge
             )
         }
+        return
     }
-}
 
-@Composable
-fun CameraPreviewStreaming(
-    modifier: Modifier = Modifier,
-    hub: FrameHub
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    // Initialize pipeline components
+    val hub = remember { FrameHub() }
+    val coordinator = remember {
+        PipelineCoordinator(context.applicationContext, hub, scope)
+    }
 
-    AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx)
+    // Create and remember the preview view
+    val previewView = remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FIT_CENTER
+        }
+    }
 
-            previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
-            previewView.scaleType = FIT_CENTER
+    // Set up camera
+    LaunchedEffect(granted) {
+        if (granted) {
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
 
                 val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
+                    it.surfaceProvider = previewView.surfaceProvider
                 }
 
                 val streamer = CameraStreamer(hub)
@@ -186,12 +250,27 @@ fun CameraPreviewStreaming(
                         preview,
                         analysis
                     )
-                } catch (_: Exception) {
-                }
-            }, ContextCompat.getMainExecutor(ctx))
+                } catch (_: Exception) {}
+            }, ContextCompat.getMainExecutor(context))
 
-            previewView
-        },
-        modifier = modifier
+            coordinator.start()
+        }
+    }
+
+    // Cleanup
+    DisposableEffect(Unit) {
+        onDispose {
+            coordinator.stop()
+        }
+    }
+
+    // Main screen with mode selection
+    MainScreen(
+        previewView = previewView,
+        coordinator = coordinator,
+        audioManager = audioManager,
+        hapticManager = hapticManager,
+        preferences = preferences,
+        onNavigateToSettings = onNavigateToSettings
     )
 }

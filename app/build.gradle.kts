@@ -51,6 +51,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
+    // --- Material Icons Extended (for VolumeUp, Explore, Navigation, etc.) ---
+    implementation("androidx.compose.material:material-icons-extended")
+
     // --- CameraX ---
     val cameraxVersion = "1.4.0" // stable line; if your catalog already has these, use that instead
     implementation("androidx.camera:camera-core:$cameraxVersion")
@@ -70,7 +73,18 @@ dependencies {
     // --- ONNX Runtime (Android) ---
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 
+    // --- DataStore for preferences ---
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // --- Navigation Compose ---
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // --- ViewModel Compose ---
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+
     testImplementation(libs.junit)
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.2.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
