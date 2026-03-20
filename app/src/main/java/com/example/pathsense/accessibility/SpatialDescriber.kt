@@ -84,17 +84,31 @@ data class NavigationAnalysis(
      */
     fun toSpokenText(): String {
         return when {
-            clearPath -> "Clear path ahead"
+            clearPath -> "Clear path ahead. Continue forward."
             primaryObstacle != null -> {
                 val proximityText = when (primaryObstacle.proximity) {
                     Proximity.NEAR -> "Obstacle very close"
                     Proximity.MED -> "Obstacle nearby"
-                    Proximity.FAR -> "Obstacle ahead"
+                    Proximity.FAR -> "Obstacle in the distance"
                     Proximity.UNKNOWN -> "Obstacle detected"
                 }
-                "$proximityText, ${primaryObstacle.zone.description}"
+                val command = when (primaryObstacle.zone) {
+                    NavigationZone.TOP_LEFT,
+                    NavigationZone.MIDDLE_LEFT,
+                    NavigationZone.BOTTOM_LEFT -> "turn slightly right"
+
+                    NavigationZone.TOP_RIGHT,
+                    NavigationZone.MIDDLE_RIGHT,
+                    NavigationZone.BOTTOM_RIGHT -> "turn slightly left"
+
+                    NavigationZone.TOP_CENTER,
+                    NavigationZone.MIDDLE_CENTER -> "go straight cautiously"
+
+                    NavigationZone.BOTTOM_CENTER -> "watch your step"
+                }
+                "$proximityText. $command."
             }
-            else -> "Checking surroundings"
+            else -> "Checking surroundings."
         }
     }
 }

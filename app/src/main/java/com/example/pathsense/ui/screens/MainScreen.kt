@@ -145,6 +145,20 @@ fun MainScreen(
                         highContrast = highContrast
                     )
                 }
+                AppMode.ALL -> {
+                    AllScreen(
+                        previewView = previewView,
+                        coordinator = coordinator,
+                        audioManager = audioManager,
+                        hapticManager = hapticManager,
+                        preferences = preferences,
+                        spatialDescriber = spatialDescriber,
+                        depthSampler = depthSampler,
+                        showBoundingBoxes = showBoundingBoxes,
+                        showDepthVisualization = showDepthVisualization,
+                        highContrast = highContrast
+                    )
+                }
             }
         }
     }

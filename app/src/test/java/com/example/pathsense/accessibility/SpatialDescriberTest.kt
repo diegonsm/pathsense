@@ -257,7 +257,7 @@ class SpatialDescriberTest {
         val analysis = describer.analyzeNavigationZones(zones)
 
         assertTrue(analysis.clearPath)
-        assertEquals("Clear path ahead", analysis.toSpokenText())
+        assertEquals("Clear path ahead. Continue forward.", analysis.toSpokenText())
     }
 
     @Test

@@ -52,6 +52,11 @@ enum class AppMode(
         label = "Navigate",
         icon = Icons.Default.Navigation,
         contentDescription = "Navigate mode: Get obstacle warnings and path guidance"
+    ),
+    ALL(
+        label = "All",
+        icon = Icons.Default.Navigation,
+        contentDescription = "All mode: Navigation guidance plus object and text feedback"
     )
 }
 

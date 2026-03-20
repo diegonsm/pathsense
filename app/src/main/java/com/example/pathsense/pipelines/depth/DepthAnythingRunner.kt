@@ -3,6 +3,7 @@ package com.example.pathsense.pipelines.depth
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -49,35 +50,79 @@ class DepthAnythingRunner(private val context: Context) {
             session.run(mapOf(inputName to it)).use { out ->
                 val value = (out[0] as OnnxTensor).value
                 val depth2d: Array<FloatArray>? = when (value) {
+                    // Most common cases for ONNX Runtime:
+                    // - [H][W] => Array<FloatArray>
+                    // - [1][H][W] => Array<Array<FloatArray>>
                     is Array<*> -> {
-                        val a0 = value as Array<*>
-                        val first = a0.firstOrNull()
+                        val first = value.firstOrNull()
                         when (first) {
+                            is FloatArray -> {
+                                // value is [H][W]
+                                @Suppress("UNCHECKED_CAST")
+                                value as Array<FloatArray>
+                            }
                             is Array<*> -> {
-                                val first2 = (first as Array<*>).firstOrNull()
+                                val first2 = first.firstOrNull()
                                 when (first2) {
-                                    is FloatArray -> first as Array<FloatArray> // [H][W]
-                                    is Array<*> -> {
-                                        val inner = first2 as Array<*>
-                                        if (inner.firstOrNull() is FloatArray) {
-                                            inner as Array<FloatArray> // [H][W]
-                                        } else null
+                                    is FloatArray -> {
+                                        // value is [1][H][W] (outer [1], inner [H] where each is FloatArray)
+                                        @Suppress("UNCHECKED_CAST")
+                                        first as Array<FloatArray>
                                     }
                                     else -> null
                                 }
                             }
-                            is FloatArray -> null
                             else -> null
                         }
                     }
+
+                    // Fallback for flattened outputs (rare, depends on runtime/model export).
+                    // We attempt to recover [H][W] from tensor shape via reflection.
+                    is FloatArray -> {
+                        val shape = getTensorShapeViaReflection(out[0] as OnnxTensor)
+                        val h = shape?.getOrNull(shape.size - 2)?.toInt()
+                        val w = shape?.getOrNull(shape.size - 1)?.toInt()
+                        if (h == null || w == null || h <= 0 || w <= 0) {
+                            null
+                        } else {
+                            val depth = Array(h) { FloatArray(w) }
+                            var idx = 0
+                            for (y in 0 until h) {
+                                for (x in 0 until w) {
+                                    if (idx >= value.size) break
+                                    depth[y][x] = value[idx++]
+                                }
+                            }
+                            depth
+                        }
+                    }
+
                     else -> null
                 }
 
-                if (depth2d == null) return null
+                if (depth2d == null) {
+                    Log.e(
+                        "DepthAnythingRunner",
+                        "Failed to parse depth output. valueType=${value?.javaClass?.name}"
+                    )
+                    return null
+                }
 
                 // CHANGED: convert raw depth -> compact closeness map (0..255) for fast ROI sampling
                 return depthToClosenessMap(depth2d) // CHANGED
             }
+        }
+    }
+
+    private fun getTensorShapeViaReflection(tensor: OnnxTensor): LongArray? {
+        return try {
+            val infoGetter = tensor.javaClass.methods.firstOrNull { it.name == "getInfo" }
+            val infoObj = infoGetter?.invoke(tensor)
+            val shapeGetter = infoObj?.javaClass?.methods?.firstOrNull { it.name == "getShape" }
+            @Suppress("UNCHECKED_CAST")
+            shapeGetter?.invoke(infoObj) as? LongArray
+        } catch (_: Throwable) {
+            null
         }
     }
 

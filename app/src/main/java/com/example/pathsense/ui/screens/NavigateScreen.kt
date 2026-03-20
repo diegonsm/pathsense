@@ -29,8 +29,8 @@ import com.example.pathsense.accessibility.HapticFeedbackManager
 import com.example.pathsense.accessibility.HapticPattern
 import com.example.pathsense.accessibility.NavigationAnalysis
 import com.example.pathsense.accessibility.SpatialDescriber
+import com.example.pathsense.pipelines.DepthStatus
 import com.example.pathsense.pipelines.PipelineCoordinator
-import com.example.pathsense.pipelines.depth.DepthAnythingRunner
 import com.example.pathsense.pipelines.depth.DepthSampler
 import com.example.pathsense.pipelines.results.Proximity
 import com.example.pathsense.ui.components.CameraViewWithOverlay
@@ -61,18 +61,44 @@ fun NavigateScreen(
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val depthResult by coordinator.depthState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val depthStatus by coordinator.depthStatus.collectAsState()
 
     // Navigation state
     var navigationAnalysis by remember { mutableStateOf<NavigationAnalysis?>(null) }
     var zoneDisplays by remember { mutableStateOf<List<ZoneDisplay>>(emptyList()) }
-    var lastAnnouncement by remember { mutableStateOf("Clear path ahead") }
+    var lastAnnouncement by remember { mutableStateOf("Clear path ahead. Continue forward.") }
     var wasPathClear by remember { mutableStateOf(true) }
 
     // Get depth visualization bitmap
     val depthVisualization: Bitmap? = depthResult?.depthViz
 
-    // Analyze navigation zones when depth map updates
-    LaunchedEffect(depthMap) {
+    // Give clear feedback for depth status changes
+    LaunchedEffect(depthStatus) {
+        when (val status = depthStatus) {
+            DepthStatus.Loading -> {
+                // Keep it short and explicit; the chip below gives ongoing UI feedback.
+                audioManager.announce("Loading depth guidance", AnnouncementPriority.HIGH, bypassDebounce = true)
+                hapticManager.trigger(HapticPattern.DETECTION)
+            }
+            DepthStatus.Ready -> {
+                audioManager.announce("Depth guidance active", AnnouncementPriority.HIGH, bypassDebounce = true)
+                hapticManager.trigger(HapticPattern.SUCCESS)
+            }
+            is DepthStatus.Failed -> {
+                val msg = status.reason.ifBlank { "Depth model failed." }
+                audioManager.announce(
+                    "Depth guidance unavailable. ${msg}. Using object detection guidance instead.",
+                    AnnouncementPriority.IMMEDIATE,
+                    bypassDebounce = true
+                )
+                hapticManager.trigger(HapticPattern.ALERT)
+            }
+        }
+    }
+
+    // Analyze navigation zones when depth map updates (only when ready)
+    LaunchedEffect(depthMap, depthStatus) {
+        if (depthStatus !is DepthStatus.Ready) return@LaunchedEffect
         val depth = depthMap ?: return@LaunchedEffect
 
         // Sample all navigation zones
@@ -124,6 +150,7 @@ fun NavigateScreen(
     // Periodic haptic feedback for very close obstacles
     LaunchedEffect(navigationAnalysis) {
         val analysis = navigationAnalysis ?: return@LaunchedEffect
+        if (depthStatus !is DepthStatus.Ready) return@LaunchedEffect
         if (analysis.primaryObstacle?.proximity == Proximity.NEAR) {
             while (true) {
                 delay(1500)
@@ -138,24 +165,7 @@ fun NavigateScreen(
         }
     }
 
-    // Track if depth is available (received at least one depth frame)
-    var depthAvailable by remember { mutableStateOf(false) }
-    var depthCheckDone by remember { mutableStateOf(false) }
-
-    // Check for depth availability after a delay
-    LaunchedEffect(Unit) {
-        delay(3000)  // Wait 3 seconds for depth to initialize
-        depthCheckDone = true
-        if (depthMap == null) {
-            audioManager.announce("Navigate mode requires depth sensor. Using Explore mode for object detection.", AnnouncementPriority.HIGH)
-        }
-    }
-
-    LaunchedEffect(depthMap) {
-        if (depthMap != null) {
-            depthAvailable = true
-        }
-    }
+    val depthAvailable = depthStatus is DepthStatus.Ready && depthMap != null
 
     Box(modifier = modifier.fillMaxSize()) {
         // Camera with optional depth visualization
@@ -195,7 +205,7 @@ fun NavigateScreen(
         )
 
         // Show unavailable message if depth not working
-        if (depthCheckDone && !depthAvailable) {
+        if (depthStatus is DepthStatus.Failed) {
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -215,7 +225,8 @@ fun NavigateScreen(
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "Depth estimation is not available on this device.\n\nUse Explore mode for object detection.",
+                        text = (depthStatus as DepthStatus.Failed).reason +
+                            "\n\nUse Explore mode for object detection.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (highContrast) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -226,7 +237,11 @@ fun NavigateScreen(
         } else {
             // Navigation status chip (bottom center)
             FeedbackChip(
-                text = if (depthAvailable) lastAnnouncement else "Initializing depth...",
+                text = when (depthStatus) {
+                    DepthStatus.Loading -> "Loading depth guidance..."
+                    DepthStatus.Ready -> if (depthAvailable) lastAnnouncement else "Waiting for depth frames..."
+                    is DepthStatus.Failed -> "Depth guidance unavailable"
+                },
                 isSpeaking = isSpeaking,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

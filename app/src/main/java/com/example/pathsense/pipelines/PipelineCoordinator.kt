@@ -14,6 +14,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+sealed interface DepthStatus {
+    data object Loading : DepthStatus
+    data object Ready : DepthStatus
+    data class Failed(val reason: String) : DepthStatus
+}
+
 /**
  * Coordinates all ML pipelines (OCR, object detection, depth estimation).
  * Exposes reactive state flows for UI consumption.
@@ -43,10 +49,13 @@ class PipelineCoordinator(
     private val _depthMapState = MutableStateFlow<DepthAnythingRunner.DepthMap?>(null)
     val depthMapState: StateFlow<DepthAnythingRunner.DepthMap?> = _depthMapState.asStateFlow()
 
+    private val _depthStatus = MutableStateFlow<DepthStatus>(DepthStatus.Loading)
+    val depthStatus: StateFlow<DepthStatus> = _depthStatus.asStateFlow()
+
     private var started = false
 
-    // Depth is DISABLED by default due to potential native crashes on some devices
-    // The app works fully with Explore (detection) and Text (OCR) modes without depth
+    // Depth is enabled by default, but we keep it fail-safe:
+    // if the model fails to load or inference fails, we disable depth and expose status to the UI.
     private var depthEnabled = false
 
     fun start() {
@@ -62,18 +71,18 @@ class PipelineCoordinator(
                     android.util.Log.e("PipelineCoordinator", "Failed to load detection model", e)
                 }
 
-                // Depth model loading is disabled by default
-                // Uncomment the block below to enable depth (may crash on some devices)
-                /*
                 try {
                     depth.load()
                     depthEnabled = true
+                    _depthStatus.value = DepthStatus.Ready
                     android.util.Log.i("PipelineCoordinator", "Depth model loaded successfully")
                 } catch (e: Throwable) {
                     android.util.Log.e("PipelineCoordinator", "Failed to load depth model", e)
                     depthEnabled = false
+                    _depthStatus.value = DepthStatus.Failed(
+                        reason = "Depth model load failed: ${e.message ?: e::class.java.simpleName}"
+                    )
                 }
-                */
             }
 
             // OCR pipeline
@@ -96,10 +105,12 @@ class PipelineCoordinator(
             }
 
             // Depth estimation pipeline - DISABLED by default
-            // Only runs if depthEnabled is manually set to true above
+            // Only runs if depthEnabled was set to true after model load
             if (depthEnabled) {
                 launch(Dispatchers.Default) {
                     var lastDepthMs = 0L
+                    var consecutiveNullMaps = 0
+                    val maxConsecutiveNullMaps = 5
 
                     for (frame in hub.depthFrames) {
                         val nowMs = android.os.SystemClock.elapsedRealtime()
@@ -108,9 +119,22 @@ class PipelineCoordinator(
 
                         try {
                             val map = depth.run(frame.bitmap)
+                            if (map == null) {
+                                consecutiveNullMaps++
+                                if (consecutiveNullMaps >= maxConsecutiveNullMaps) {
+                                    depthEnabled = false
+                                    _depthStatus.value = DepthStatus.Failed(
+                                        reason = "Depth output could not be parsed (no usable depth maps for a while)."
+                                    )
+                                    break
+                                }
+                                continue
+                            }
+
+                            consecutiveNullMaps = 0
                             _depthMapState.value = map
 
-                            val viz = map?.let { depth.toGrayscaleBitmap(it) }
+                            val viz = depth.toGrayscaleBitmap(map)
                             val scaledViz = viz?.let {
                                 Bitmap.createScaledBitmap(it, frame.bitmap.width, frame.bitmap.height, true)
                             }
@@ -118,6 +142,9 @@ class PipelineCoordinator(
                         } catch (e: Throwable) {
                             android.util.Log.e("PipelineCoordinator", "Depth inference failed", e)
                             depthEnabled = false
+                            _depthStatus.value = DepthStatus.Failed(
+                                reason = "Depth inference failed: ${e.message ?: e::class.java.simpleName}"
+                            )
                             break
                         }
                     }
@@ -131,5 +158,7 @@ class PipelineCoordinator(
         ocr.close()
         det.close()
         depth.close()
+        depthEnabled = false
+        _depthStatus.value = DepthStatus.Loading
     }
 }
