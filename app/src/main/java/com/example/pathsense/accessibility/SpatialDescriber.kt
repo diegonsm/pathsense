@@ -145,8 +145,11 @@ class SpatialDescriber {
     }
 
     /**
-     * Describe multiple detections, prioritized by proximity and confidence.
-     * Returns descriptions sorted by importance (close objects first, then high confidence).
+     * Describe multiple detections, prioritized by tier → proximity → confidence.
+     * Tier 0 (safety-critical): people and vehicles
+     * Tier 1 (navigation-relevant): animals, key signage
+     * Tier 2 (obstacles): furniture and large objects
+     * Tier 3 (everything else)
      */
     fun describeDetections(
         detections: List<Detection>,
@@ -157,16 +160,29 @@ class SpatialDescriber {
                 describeDetection(detection, labelProvider(detection.classId))
             }
             .sortedWith(
-                compareBy<SpatialDescription> {
-                    // Closer objects have higher priority (lower sort value)
-                    when (it.proximity) {
-                        Proximity.NEAR -> 0
-                        Proximity.MED -> 1
-                        Proximity.FAR -> 2
-                        Proximity.UNKNOWN -> 3
+                compareBy<SpatialDescription> { labelTier(it.label) }
+                    .thenBy {
+                        when (it.proximity) {
+                            Proximity.NEAR -> 0
+                            Proximity.MED -> 1
+                            Proximity.FAR -> 2
+                            Proximity.UNKNOWN -> 3
+                        }
                     }
-                }.thenByDescending { it.confidence }
+                    .thenByDescending { it.confidence }
             )
+    }
+
+    private fun labelTier(label: String): Int = when (label) {
+        // Tier 0 — safety-critical: always announce first
+        "person", "car", "truck", "bus", "motorcycle", "bicycle" -> 0
+        // Tier 1 — navigation-relevant
+        "dog", "cat", "traffic light", "stop sign", "fire hydrant" -> 1
+        // Tier 2 — obstacles worth knowing about
+        "chair", "couch", "bench", "bed", "dining table",
+        "toilet", "potted plant", "suitcase", "backpack" -> 2
+        // Tier 3 — everything else (low priority)
+        else -> 3
     }
 
     /**
