@@ -52,7 +52,7 @@ fun MainScreen(
     val accessibilitySettings = LocalAccessibilitySettings.current
     val highContrast = accessibilitySettings.highContrast
 
-    var currentMode by remember { mutableStateOf(AppMode.EXPLORE) }
+    var currentMode by remember { mutableStateOf(AppMode.SCENE) }
 
     // Collect preference states
     val showBoundingBoxes by preferences.showBoundingBoxes.collectAsState(initial = true)
@@ -111,8 +111,8 @@ fun MainScreen(
                 .padding(paddingValues)
         ) {
             when (currentMode) {
-                AppMode.EXPLORE -> {
-                    ExploreScreen(
+                AppMode.SCENE -> {
+                    SceneScreen(
                         previewView = previewView,
                         coordinator = coordinator,
                         audioManager = audioManager,
@@ -123,7 +123,7 @@ fun MainScreen(
                         highContrast = highContrast
                     )
                 }
-                AppMode.TEXT -> {
+                AppMode.READ -> {
                     TextScreen(
                         previewView = previewView,
                         coordinator = coordinator,
@@ -142,6 +142,18 @@ fun MainScreen(
                         spatialDescriber = spatialDescriber,
                         depthSampler = depthSampler,
                         showDepthVisualization = showDepthVisualization,
+                        highContrast = highContrast
+                    )
+                }
+                AppMode.ALL -> {
+                    AllScreen(
+                        previewView = previewView,
+                        coordinator = coordinator,
+                        audioManager = audioManager,
+                        hapticManager = hapticManager,
+                        spatialDescriber = spatialDescriber,
+                        depthSampler = depthSampler,
+                        showBoundingBoxes = showBoundingBoxes,
                         highContrast = highContrast
                     )
                 }

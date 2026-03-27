@@ -32,6 +32,8 @@ import com.example.pathsense.accessibility.SpatialDescriber
 import com.example.pathsense.pipelines.PipelineCoordinator
 import com.example.pathsense.pipelines.depth.DepthAnythingRunner
 import com.example.pathsense.pipelines.depth.DepthSampler
+import com.example.pathsense.pipelines.detection.cocoLabel
+import com.example.pathsense.pipelines.results.Detection
 import com.example.pathsense.pipelines.results.Proximity
 import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.FeedbackChip
@@ -57,61 +59,66 @@ fun NavigateScreen(
     highContrast: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Collect depth results
+    // Collect all relevant pipeline results
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val depthResult by coordinator.depthState.collectAsState(initial = null)
+    val detResult by coordinator.detState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
 
     // Navigation state
     var navigationAnalysis by remember { mutableStateOf<NavigationAnalysis?>(null) }
     var zoneDisplays by remember { mutableStateOf<List<ZoneDisplay>>(emptyList()) }
+    var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
     var lastAnnouncement by remember { mutableStateOf("Clear path ahead") }
     var wasPathClear by remember { mutableStateOf(true) }
 
     // Get depth visualization bitmap
     val depthVisualization: Bitmap? = depthResult?.depthViz
 
+    // Enrich detections with depth when both are available
+    LaunchedEffect(detResult, depthMap) {
+        val detections = detResult?.detections ?: emptyList()
+        val depth = depthMap
+        enrichedDetections = if (depth != null && detections.isNotEmpty()) {
+            depthSampler.enrichDetections(depth, detections)
+        } else {
+            detections
+        }
+    }
+
     // Analyze navigation zones when depth map updates
-    LaunchedEffect(depthMap) {
+    LaunchedEffect(depthMap, enrichedDetections) {
         val depth = depthMap ?: return@LaunchedEffect
 
-        // Sample all navigation zones
         val zoneResults = depthSampler.sampleNavigationZones(depth)
+        zoneDisplays = zoneResults.map { ZoneDisplay(it.proximity, it.closenessValue) }
 
-        // Convert to display format
-        zoneDisplays = zoneResults.map { result ->
-            ZoneDisplay(
-                proximity = result.proximity,
-                closeness = result.closenessValue
-            )
-        }
-
-        // Analyze for navigation guidance
         val analysis = spatialDescriber.analyzeNavigationZones(zoneResults)
         navigationAnalysis = analysis
 
-        // Generate announcement based on path status
-        val announcement = analysis.toSpokenText()
+        // Build announcement: prefer named objects over generic "obstacle"
+        val nearObjects = enrichedDetections.filter { it.proximity == Proximity.NEAR }
+        val announcement = if (!analysis.clearPath && nearObjects.isNotEmpty()) {
+            val names = nearObjects.take(2).joinToString(" and ") { cocoLabel(it.classId) }
+            "$names very close, ${analysis.primaryObstacle?.zone?.description ?: "ahead"}"
+        } else {
+            analysis.toSpokenText()
+        }
 
-        // Announce changes in path status
         if (analysis.clearPath != wasPathClear || announcement != lastAnnouncement) {
             wasPathClear = analysis.clearPath
             lastAnnouncement = announcement
 
             if (analysis.clearPath) {
-                // Path cleared - announce with low priority
                 audioManager.announce(announcement, AnnouncementPriority.NORMAL)
                 hapticManager.trigger(HapticPattern.SUCCESS)
             } else {
-                // Obstacle detected - announce with high priority
                 val priority = when (analysis.primaryObstacle?.proximity) {
                     Proximity.NEAR -> AnnouncementPriority.IMMEDIATE
                     Proximity.MED -> AnnouncementPriority.HIGH
                     else -> AnnouncementPriority.NORMAL
                 }
                 audioManager.announce(announcement, priority, bypassDebounce = true)
-
-                // Haptic warning based on proximity
                 when (analysis.primaryObstacle?.proximity) {
                     Proximity.NEAR -> hapticManager.trigger(HapticPattern.ALERT)
                     Proximity.MED -> hapticManager.trigger(HapticPattern.WARNING)

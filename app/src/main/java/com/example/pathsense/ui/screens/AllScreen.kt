@@ -8,13 +8,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.pathsense.accessibility.AnnouncementPriority
 import com.example.pathsense.accessibility.AudioFeedbackManager
 import com.example.pathsense.accessibility.HapticFeedbackManager
 import com.example.pathsense.accessibility.HapticPattern
@@ -32,11 +33,16 @@ import com.example.pathsense.ui.components.SpeakingIndicator
 import kotlinx.coroutines.delay
 
 /**
- * Scene mode screen for object detection with spatial audio feedback.
- * Announces detected objects using clock orientation (12 o'clock = ahead).
+ * All mode: object detection, OCR, and depth running concurrently.
+ *
+ * Announcement priority:
+ *   1. NEAR obstacle (depth-confirmed) → IMMEDIATE
+ *   2. Person / vehicle detected       → HIGH
+ *   3. Stable OCR text (>10 chars)     → NORMAL
+ *   4. Other objects (with cooldown)   → NORMAL
  */
 @Composable
-fun SceneScreen(
+fun AllScreen(
     previewView: PreviewView,
     coordinator: PipelineCoordinator,
     audioManager: AudioFeedbackManager,
@@ -47,23 +53,22 @@ fun SceneScreen(
     highContrast: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Collect detection results
     val detResult by coordinator.detState.collectAsState(initial = null)
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
+    val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
 
-    // Per-label cooldown: tracks when each label was last announced (ms)
     val labelCooldowns = remember { mutableStateMapOf<String, Long>() }
     val labelCooldownMs = 7_000L
 
-    var lastAnnouncement by remember { mutableStateOf("") }
     var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
+    var lastOcrText by remember { mutableStateOf("") }
+    var lastAnnouncement by remember { mutableStateOf("") }
 
-    // Enrich detections with depth info
+    // Enrich detections with depth proximity
     LaunchedEffect(detResult, depthMap) {
         val detections = detResult?.detections ?: emptyList()
         val depth = depthMap
-
         enrichedDetections = if (depth != null && detections.isNotEmpty()) {
             depthSampler.enrichDetections(depth, detections)
         } else {
@@ -71,42 +76,60 @@ fun SceneScreen(
         }
     }
 
-    // Announce detections with spatial orientation
+    // Detection + depth announcements
     LaunchedEffect(enrichedDetections) {
         if (enrichedDetections.isEmpty()) return@LaunchedEffect
 
         val now = System.currentTimeMillis()
 
-        // Get spatial descriptions, then filter out labels announced within the cooldown window
-        val allDescriptions = spatialDescriber.describeDetections(
+        // NEAR obstacles get immediate priority regardless of cooldown
+        val nearObjects = enrichedDetections.filter { it.proximity == Proximity.NEAR }
+        if (nearObjects.isNotEmpty()) {
+            val names = nearObjects.take(2).joinToString(" and ") { cocoLabel(it.classId) }
+            val announcement = "$names very close"
+            if (announcement != lastAnnouncement) {
+                lastAnnouncement = announcement
+                audioManager.announce(announcement, AnnouncementPriority.IMMEDIATE, bypassDebounce = true)
+                hapticManager.trigger(HapticPattern.ALERT)
+                nearObjects.forEach { labelCooldowns[cocoLabel(it.classId)] = now }
+            }
+            return@LaunchedEffect
+        }
+
+        // Non-NEAR objects: respect cooldowns, use priority sorting
+        val descriptions = spatialDescriber.describeDetections(
             detections = enrichedDetections,
             labelProvider = ::cocoLabel
         )
-        val readyDescriptions = allDescriptions.filter { desc ->
-            val lastSpoken = labelCooldowns[desc.label] ?: 0L
-            now - lastSpoken >= labelCooldownMs
+        val ready = descriptions.filter { desc ->
+            now - (labelCooldowns[desc.label] ?: 0L) >= labelCooldownMs
         }
+        if (ready.isEmpty()) return@LaunchedEffect
 
-        if (readyDescriptions.isEmpty()) return@LaunchedEffect
-
-        val announcement = spatialDescriber.generateSummaryAnnouncement(readyDescriptions)
-
+        val announcement = spatialDescriber.generateSummaryAnnouncement(ready)
         if (announcement != lastAnnouncement) {
             lastAnnouncement = announcement
-            // Record cooldown for every label included in this announcement
-            readyDescriptions.forEach { labelCooldowns[it.label] = now }
-            audioManager.announce(announcement)
+            ready.forEach { labelCooldowns[it.label] = now }
+            audioManager.announce(announcement, AnnouncementPriority.NORMAL)
+            hapticManager.trigger(HapticPattern.DETECTION)
+        }
+    }
 
-            val closestProximity = readyDescriptions.firstOrNull()?.proximity
-            when (closestProximity) {
-                Proximity.NEAR -> hapticManager.trigger(HapticPattern.PROXIMITY_NEAR)
-                Proximity.MED -> hapticManager.trigger(HapticPattern.PROXIMITY_MEDIUM)
-                else -> hapticManager.trigger(HapticPattern.DETECTION)
+    // OCR announcements — only when text is stable and meaningfully long
+    LaunchedEffect(ocrResult) {
+        val text = ocrResult?.text?.trim() ?: return@LaunchedEffect
+        if (text.length > 10 && text != lastOcrText) {
+            lastOcrText = text
+            // Only read text if no NEAR obstacle is active
+            val hasNearObstacle = enrichedDetections.any { it.proximity == Proximity.NEAR }
+            if (!hasNearObstacle) {
+                audioManager.announce(text, AnnouncementPriority.NORMAL)
+                hapticManager.trigger(HapticPattern.SUCCESS)
             }
         }
     }
 
-    // Periodically evict expired cooldowns so the map doesn't grow unbounded
+    // Periodic cooldown cleanup
     LaunchedEffect(Unit) {
         while (true) {
             delay(15_000)
@@ -117,7 +140,6 @@ fun SceneScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Camera with detection overlay
         CameraViewWithOverlay(
             previewView = previewView,
             detections = enrichedDetections,
@@ -126,16 +148,14 @@ fun SceneScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Mode indicator (top left)
         ModeIndicator(
-            modeName = "Scene",
+            modeName = "All",
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp),
             highContrast = highContrast
         )
 
-        // Speaking indicator (top right)
         SpeakingIndicator(
             isSpeaking = isSpeaking,
             modifier = Modifier
@@ -144,7 +164,6 @@ fun SceneScreen(
             highContrast = highContrast
         )
 
-        // Detection count (bottom left, above nav bar)
         DetectionCountIndicator(
             count = enrichedDetections.size,
             modifier = Modifier
@@ -153,7 +172,6 @@ fun SceneScreen(
             highContrast = highContrast
         )
 
-        // Last announcement chip (bottom center)
         if (lastAnnouncement.isNotEmpty()) {
             FeedbackChip(
                 text = lastAnnouncement,

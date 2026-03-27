@@ -11,9 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Navigation
-import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,20 +39,25 @@ enum class AppMode(
     val icon: ImageVector,
     val contentDescription: String
 ) {
-    EXPLORE(
-        label = "Explore",
-        icon = Icons.Default.Explore,
-        contentDescription = "Explore mode: Detect and announce objects around you"
+    SCENE(
+        label = "Scene",
+        icon = Icons.Default.Visibility,
+        contentDescription = "Scene mode: Identify and describe objects around you"
     ),
-    TEXT(
-        label = "Text",
-        icon = Icons.Default.TextFields,
-        contentDescription = "Text mode: Read text from signs, documents, and screens"
+    READ(
+        label = "Read",
+        icon = Icons.Default.MenuBook,
+        contentDescription = "Read mode: Read text from signs, documents, and screens"
     ),
     NAVIGATE(
         label = "Navigate",
-        icon = Icons.Default.Navigation,
-        contentDescription = "Navigate mode: Get obstacle warnings and path guidance"
+        icon = Icons.Default.DirectionsWalk,
+        contentDescription = "Navigate mode: Real-time obstacle warnings while walking"
+    ),
+    ALL(
+        label = "All",
+        icon = Icons.Default.Dashboard,
+        contentDescription = "All mode: Scene, text, and navigation running together"
     )
 }
 

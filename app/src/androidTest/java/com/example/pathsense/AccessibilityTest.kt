@@ -37,7 +37,7 @@ class AccessibilityTest {
 
     @Test
     fun modeSelector_hasAccessibleLabels() {
-        var selectedMode = AppMode.EXPLORE
+        var selectedMode = AppMode.SCENE
 
         composeTestRule.setContent {
             PathSenseTheme {
@@ -48,26 +48,25 @@ class AccessibilityTest {
             }
         }
 
-        // Each mode should have content description
         composeTestRule.onNodeWithContentDescription(
-            "Explore mode, selected. Explore mode: Detect and announce objects around you",
+            "Scene mode, selected. Scene mode: Identify and describe objects around you",
             substring = true
         ).assertIsDisplayed()
 
         composeTestRule.onNodeWithContentDescription(
-            "Text mode. Text mode: Read text from signs, documents, and screens",
+            "Read mode. Read mode: Read text from signs, documents, and screens",
             substring = true
         ).assertIsDisplayed()
 
         composeTestRule.onNodeWithContentDescription(
-            "Navigate mode. Navigate mode: Get obstacle warnings and path guidance",
+            "Navigate mode. Navigate mode: Real-time obstacle warnings while walking",
             substring = true
         ).assertIsDisplayed()
     }
 
     @Test
     fun modeSelector_changesSelectionOnClick() {
-        var selectedMode = AppMode.EXPLORE
+        var selectedMode = AppMode.SCENE
 
         composeTestRule.setContent {
             PathSenseTheme {
@@ -78,11 +77,11 @@ class AccessibilityTest {
             }
         }
 
-        // Click on Text mode
-        composeTestRule.onNodeWithText("Text").performClick()
+        // Click on Read mode
+        composeTestRule.onNodeWithText("Read").performClick()
 
         // Verify selection changed
-        assert(selectedMode == AppMode.TEXT)
+        assert(selectedMode == AppMode.READ)
     }
 
     // Accessible Button Tests
@@ -243,7 +242,7 @@ class AccessibilityTest {
         composeTestRule.setContent {
             PathSenseTheme(highContrast = true) {
                 ModeSelector(
-                    currentMode = AppMode.EXPLORE,
+                    currentMode = AppMode.SCENE,
                     onModeSelected = {},
                     highContrast = true
                 )
@@ -251,7 +250,7 @@ class AccessibilityTest {
         }
 
         // Mode selector should be visible with high contrast
-        composeTestRule.onNodeWithText("Explore").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Scene").assertIsDisplayed()
     }
 
     @Test
