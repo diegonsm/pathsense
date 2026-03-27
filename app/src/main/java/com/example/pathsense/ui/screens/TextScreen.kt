@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -179,6 +180,22 @@ fun TextScreen(
                         .padding(top = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Restabilize button — clears current OCR state so next frame is treated as fresh
+                    AccessibleButton(
+                        text = "Restabilize",
+                        onClick = {
+                            audioManager.stop()
+                            currentText = ""
+                            lastAutoReadText = ""
+                            hapticManager.trigger(HapticPattern.DOUBLE_TAP)
+                        },
+                        icon = Icons.Default.Refresh,
+                        style = AccessibleButtonStyle.TONAL,
+                        enabled = true,
+                        highContrast = highContrast,
+                        modifier = Modifier.weight(1f)
+                    )
+
                     // Read Again button
                     AccessibleButton(
                         text = "Read Again",
@@ -189,7 +206,7 @@ fun TextScreen(
                                 hapticManager.trigger(HapticPattern.TAP)
                             }
                         },
-                        icon = Icons.Default.Refresh,
+                        icon = Icons.Default.VolumeUp,
                         style = AccessibleButtonStyle.FILLED,
                         enabled = currentText.isNotEmpty(),
                         highContrast = highContrast,
