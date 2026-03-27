@@ -206,6 +206,8 @@ fun AllScreen(
             detections = enrichedDetections,
             showBoundingBoxes = showBoundingBoxes,
             labelProvider = ::cocoLabel,
+            sourceFrameWidth = detResult?.frameWidth,
+            sourceFrameHeight = detResult?.frameHeight,
             modifier = Modifier.fillMaxSize()
         )
 

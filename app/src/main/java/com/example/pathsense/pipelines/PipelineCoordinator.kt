@@ -104,7 +104,12 @@ class PipelineCoordinator(
                     try {
                         val dets = det.run(frame.bitmap)
                         if (tokenBefore != modeToken.get()) continue
-                        _detState.value = DetectionResult(frame.timestampNs, dets)
+                        _detState.value = DetectionResult(
+                            tsNs = frame.timestampNs,
+                            detections = dets,
+                            frameWidth = frame.bitmap.width,
+                            frameHeight = frame.bitmap.height
+                        )
                     } catch (_: Throwable) {}
                 }
             }

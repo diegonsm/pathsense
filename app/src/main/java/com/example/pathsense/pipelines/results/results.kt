@@ -18,7 +18,9 @@ enum class Proximity { NEAR, MED, FAR, UNKNOWN }
 
 data class DetectionResult(
     val tsNs: Long,
-    val detections: List<Detection>
+    val detections: List<Detection>,
+    val frameWidth: Int,
+    val frameHeight: Int
 ) {
     val numDetections: Int get() = detections.size
 }
