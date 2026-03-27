@@ -16,8 +16,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.pathsense.accessibility.AudioFeedbackManager
+import com.example.pathsense.accessibility.ClockPosition
 import com.example.pathsense.accessibility.HapticFeedbackManager
 import com.example.pathsense.accessibility.HapticPattern
+import com.example.pathsense.accessibility.SpatialDescription
 import com.example.pathsense.accessibility.SpatialDescriber
 import com.example.pathsense.pipelines.PipelineCoordinator
 import com.example.pathsense.pipelines.depth.DepthSampler
@@ -52,9 +54,20 @@ fun SceneScreen(
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
 
-    // Per-label cooldown: tracks when each label was last announced (ms)
-    val labelCooldowns = remember { mutableStateMapOf<String, Long>() }
-    val labelCooldownMs = 7_000L
+    // Per-label spoken state to prevent repeated announcements.
+    data class SpokenState(
+        val timestampMs: Long,
+        val confidence: Float,
+        val clockPosition: ClockPosition,
+        val proximity: Proximity
+    )
+
+    val lastSpokenByLabel = remember { mutableStateMapOf<String, SpokenState>() }
+
+    val minConfidence = 0.45f
+    val minRepeatIntervalMs = 8_000L
+    val staleRefreshMs = 15_000L
+    val confidenceDelta = 0.15f
 
     var lastAnnouncement by remember { mutableStateOf("") }
     var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
@@ -77,14 +90,23 @@ fun SceneScreen(
 
         val now = System.currentTimeMillis()
 
-        // Get spatial descriptions, then filter out labels announced within the cooldown window
+        // Get spatial descriptions, then filter out labels that are not meaningful updates
         val allDescriptions = spatialDescriber.describeDetections(
             detections = enrichedDetections,
             labelProvider = ::cocoLabel
         )
         val readyDescriptions = allDescriptions.filter { desc ->
-            val lastSpoken = labelCooldowns[desc.label] ?: 0L
-            now - lastSpoken >= labelCooldownMs
+            if (desc.confidence < minConfidence) return@filter false
+
+            val last = lastSpokenByLabel[desc.label] ?: return@filter true
+            val elapsed = now - last.timestampMs
+            val positionChanged =
+                last.clockPosition != desc.clockPosition || last.proximity != desc.proximity
+            val confidenceImproved = (desc.confidence - last.confidence) >= confidenceDelta
+            val stale = elapsed >= staleRefreshMs
+            val cooldownMet = elapsed >= minRepeatIntervalMs
+
+            (cooldownMet && (positionChanged || confidenceImproved)) || stale
         }
 
         if (readyDescriptions.isEmpty()) return@LaunchedEffect
@@ -93,8 +115,15 @@ fun SceneScreen(
 
         if (announcement != lastAnnouncement) {
             lastAnnouncement = announcement
-            // Record cooldown for every label included in this announcement
-            readyDescriptions.forEach { labelCooldowns[it.label] = now }
+            // Record spoken state for every label included in this announcement
+            readyDescriptions.forEach { desc ->
+                lastSpokenByLabel[desc.label] = SpokenState(
+                    timestampMs = now,
+                    confidence = desc.confidence,
+                    clockPosition = desc.clockPosition,
+                    proximity = desc.proximity
+                )
+            }
             audioManager.announce(announcement)
 
             val closestProximity = readyDescriptions.firstOrNull()?.proximity
@@ -111,7 +140,9 @@ fun SceneScreen(
         while (true) {
             delay(15_000)
             val now = System.currentTimeMillis()
-            labelCooldowns.entries.removeAll { (_, ts) -> now - ts >= labelCooldownMs }
+            lastSpokenByLabel.entries.removeAll { (_, state) ->
+                now - state.timestampMs >= staleRefreshMs * 2
+            }
             audioManager.cleanupDebounceCache()
         }
     }

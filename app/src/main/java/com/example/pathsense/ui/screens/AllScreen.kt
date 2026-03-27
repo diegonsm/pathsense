@@ -17,8 +17,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.pathsense.accessibility.AnnouncementPriority
 import com.example.pathsense.accessibility.AudioFeedbackManager
+import com.example.pathsense.accessibility.ClockPosition
 import com.example.pathsense.accessibility.HapticFeedbackManager
 import com.example.pathsense.accessibility.HapticPattern
+import com.example.pathsense.accessibility.SpatialDescription
 import com.example.pathsense.accessibility.SpatialDescriber
 import com.example.pathsense.pipelines.PipelineCoordinator
 import com.example.pathsense.pipelines.depth.DepthSampler
@@ -58,8 +60,20 @@ fun AllScreen(
     val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
 
-    val labelCooldowns = remember { mutableStateMapOf<String, Long>() }
-    val labelCooldownMs = 7_000L
+    // Per-label spoken state to prevent repeated announcements.
+    data class SpokenState(
+        val timestampMs: Long,
+        val confidence: Float,
+        val clockPosition: ClockPosition,
+        val proximity: Proximity
+    )
+
+    val lastSpokenByLabel = remember { mutableStateMapOf<String, SpokenState>() }
+
+    val minConfidence = 0.45f
+    val minRepeatIntervalMs = 8_000L
+    val staleRefreshMs = 15_000L
+    val confidenceDelta = 0.15f
 
     var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
     var lastOcrText by remember { mutableStateOf("") }
@@ -82,16 +96,44 @@ fun AllScreen(
 
         val now = System.currentTimeMillis()
 
-        // NEAR obstacles get immediate priority regardless of cooldown
+        // NEAR obstacles get immediate priority, but still require meaningful updates
         val nearObjects = enrichedDetections.filter { it.proximity == Proximity.NEAR }
         if (nearObjects.isNotEmpty()) {
-            val names = nearObjects.take(2).joinToString(" and ") { cocoLabel(it.classId) }
-            val announcement = "$names very close"
-            if (announcement != lastAnnouncement) {
-                lastAnnouncement = announcement
-                audioManager.announce(announcement, AnnouncementPriority.IMMEDIATE, bypassDebounce = true)
-                hapticManager.trigger(HapticPattern.ALERT)
-                nearObjects.forEach { labelCooldowns[cocoLabel(it.classId)] = now }
+            val nearDescriptions = spatialDescriber.describeDetections(
+                detections = nearObjects,
+                labelProvider = ::cocoLabel
+            )
+
+            val readyNear = nearDescriptions.filter { desc ->
+                if (desc.confidence < minConfidence) return@filter false
+
+                val last = lastSpokenByLabel[desc.label] ?: return@filter true
+                val elapsed = now - last.timestampMs
+                val positionChanged =
+                    last.clockPosition != desc.clockPosition || last.proximity != desc.proximity
+                val confidenceImproved = (desc.confidence - last.confidence) >= confidenceDelta
+                val stale = elapsed >= staleRefreshMs
+                val cooldownMet = elapsed >= minRepeatIntervalMs
+
+                (cooldownMet && (positionChanged || confidenceImproved)) || stale
+            }
+
+            if (readyNear.isNotEmpty()) {
+                val names = readyNear.take(2).joinToString(" and ") { it.label }
+                val announcement = "$names very close"
+                if (announcement != lastAnnouncement) {
+                    lastAnnouncement = announcement
+                    audioManager.announce(announcement, AnnouncementPriority.IMMEDIATE, bypassDebounce = true)
+                    hapticManager.trigger(HapticPattern.ALERT)
+                    readyNear.forEach { desc ->
+                        lastSpokenByLabel[desc.label] = SpokenState(
+                            timestampMs = now,
+                            confidence = desc.confidence,
+                            clockPosition = desc.clockPosition,
+                            proximity = desc.proximity
+                        )
+                    }
+                }
             }
             return@LaunchedEffect
         }
@@ -102,14 +144,31 @@ fun AllScreen(
             labelProvider = ::cocoLabel
         )
         val ready = descriptions.filter { desc ->
-            now - (labelCooldowns[desc.label] ?: 0L) >= labelCooldownMs
+            if (desc.confidence < minConfidence) return@filter false
+
+            val last = lastSpokenByLabel[desc.label] ?: return@filter true
+            val elapsed = now - last.timestampMs
+            val positionChanged =
+                last.clockPosition != desc.clockPosition || last.proximity != desc.proximity
+            val confidenceImproved = (desc.confidence - last.confidence) >= confidenceDelta
+            val stale = elapsed >= staleRefreshMs
+            val cooldownMet = elapsed >= minRepeatIntervalMs
+
+            (cooldownMet && (positionChanged || confidenceImproved)) || stale
         }
         if (ready.isEmpty()) return@LaunchedEffect
 
         val announcement = spatialDescriber.generateSummaryAnnouncement(ready)
         if (announcement != lastAnnouncement) {
             lastAnnouncement = announcement
-            ready.forEach { labelCooldowns[it.label] = now }
+            ready.forEach { desc ->
+                lastSpokenByLabel[desc.label] = SpokenState(
+                    timestampMs = now,
+                    confidence = desc.confidence,
+                    clockPosition = desc.clockPosition,
+                    proximity = desc.proximity
+                )
+            }
             audioManager.announce(announcement, AnnouncementPriority.NORMAL)
             hapticManager.trigger(HapticPattern.DETECTION)
         }
@@ -134,7 +193,9 @@ fun AllScreen(
         while (true) {
             delay(15_000)
             val now = System.currentTimeMillis()
-            labelCooldowns.entries.removeAll { (_, ts) -> now - ts >= labelCooldownMs }
+            lastSpokenByLabel.entries.removeAll { (_, state) ->
+                now - state.timestampMs >= staleRefreshMs * 2
+            }
             audioManager.cleanupDebounceCache()
         }
     }
