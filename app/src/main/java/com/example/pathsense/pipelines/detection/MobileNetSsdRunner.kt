@@ -14,7 +14,10 @@ import com.example.pathsense.pipelines.results.Detection
 import java.nio.ByteBuffer
 import kotlin.math.min
 
-class MobileNetSsdRunner(private val context: Context) {
+class MobileNetSsdRunner(
+    private val context: Context,
+    private val minScore: Float = DEFAULT_MIN_SCORE
+) {
 
     private var env: OrtEnvironment? = null
     private var session: OrtSession? = null
@@ -72,7 +75,7 @@ class MobileNetSsdRunner(private val context: Context) {
                 val dets = ArrayList<Detection>()
                 for (i in sc.indices) {
                     val s = sc[i]
-                    if (s < 0.35f) continue
+                    if (s < minScore) continue
 
                     val box = bx.getOrNull(i)
                     if (box == null || box.size < 4) continue
@@ -242,5 +245,9 @@ class MobileNetSsdRunner(private val context: Context) {
         session = null
         try { env?.close() } catch (_: Exception) {}
         env = null
+    }
+
+    companion object {
+        const val DEFAULT_MIN_SCORE: Float = 0.5f
     }
 }
