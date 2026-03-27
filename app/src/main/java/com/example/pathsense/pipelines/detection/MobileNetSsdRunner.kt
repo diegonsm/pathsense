@@ -101,7 +101,7 @@ class MobileNetSsdRunner(private val context: Context) {
                     )
                 }
 
-                return dets.sortedByDescending { it.score }.take(10)
+                return nms(dets, iouThreshold = 0.45f, maxResults = 10)
             }
         }
     }
@@ -184,6 +184,46 @@ class MobileNetSsdRunner(private val context: Context) {
             padX = padX,
             padY = padY
         )
+    }
+
+    /**
+     * Non-Maximum Suppression: removes duplicate boxes for the same class.
+     * Keeps the highest-confidence box and suppresses any same-class box
+     * with IoU above the threshold.
+     */
+    private fun nms(
+        detections: List<Detection>,
+        iouThreshold: Float,
+        maxResults: Int
+    ): List<Detection> {
+        val sorted = detections.sortedByDescending { it.score }.toMutableList()
+        val kept = mutableListOf<Detection>()
+
+        while (sorted.isNotEmpty()) {
+            val best = sorted.removeAt(0)
+            kept.add(best)
+            if (kept.size >= maxResults) break
+
+            sorted.removeAll { candidate ->
+                candidate.classId == best.classId && iou(best, candidate) > iouThreshold
+            }
+        }
+
+        return kept
+    }
+
+    private fun iou(a: Detection, b: Detection): Float {
+        val interLeft = maxOf(a.left, b.left)
+        val interTop = maxOf(a.top, b.top)
+        val interRight = minOf(a.right, b.right)
+        val interBottom = minOf(a.bottom, b.bottom)
+
+        if (interRight <= interLeft || interBottom <= interTop) return 0f
+
+        val interArea = (interRight - interLeft) * (interBottom - interTop)
+        val aArea = (a.right - a.left) * (a.bottom - a.top)
+        val bArea = (b.right - b.left) * (b.bottom - b.top)
+        return interArea / (aArea + bArea - interArea)
     }
 
     fun close() {
