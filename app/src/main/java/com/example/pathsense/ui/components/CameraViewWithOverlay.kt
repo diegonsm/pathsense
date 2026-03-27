@@ -3,13 +3,15 @@ package com.example.pathsense.ui.components
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.RectF
+import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -17,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -97,6 +100,7 @@ fun DetectionOverlay(
     sourceFrameWidth: Int? = null,
     sourceFrameHeight: Int? = null
 ) {
+    val lastLogMs = remember { mutableStateOf(0L) }
     val labelPaint = remember {
         Paint().apply {
             isAntiAlias = true
@@ -114,8 +118,18 @@ fun DetectionOverlay(
         val canvasWidth = size.width
         val canvasHeight = size.height
 
-        val frameWidth = (sourceFrameWidth ?: 0).takeIf { it > 0 } ?: canvasWidth.toInt()
-        val frameHeight = (sourceFrameHeight ?: 0).takeIf { it > 0 } ?: canvasHeight.toInt()
+        var frameWidth = (sourceFrameWidth ?: 0).takeIf { it > 0 } ?: canvasWidth.toInt()
+        var frameHeight = (sourceFrameHeight ?: 0).takeIf { it > 0 } ?: canvasHeight.toInt()
+
+        val viewAspect = if (canvasHeight > 0f) canvasWidth / canvasHeight else 0f
+        val frameAspect = if (frameHeight > 0) frameWidth.toFloat() / frameHeight.toFloat() else 0f
+        val swappedAspect = if (frameWidth > 0) frameHeight.toFloat() / frameWidth.toFloat() else 0f
+        val shouldSwap = kotlin.math.abs(frameAspect - viewAspect) > kotlin.math.abs(swappedAspect - viewAspect)
+        if (shouldSwap) {
+            val tmp = frameWidth
+            frameWidth = frameHeight
+            frameHeight = tmp
+        }
 
         val fit = fitCenterTransform(
             viewW = canvasWidth,
@@ -124,7 +138,7 @@ fun DetectionOverlay(
             srcH = frameHeight.toFloat()
         )
 
-        detections.forEach { detection ->
+        detections.forEachIndexed { index, detection ->
             val boxColor = confidenceColor(detection.score)
 
             // Convert normalized coords (source image) to preview coords (fit-center)
@@ -132,6 +146,23 @@ fun DetectionOverlay(
             val top = fit.offsetY + detection.top * fit.scale * frameHeight
             val right = fit.offsetX + detection.right * fit.scale * frameWidth
             val bottom = fit.offsetY + detection.bottom * fit.scale * frameHeight
+
+            if (DEBUG_OVERLAY && index == 0) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastLogMs.value > 1000L) {
+                    lastLogMs.value = now
+                    Log.d(
+                        TAG,
+                        "src=${frameWidth}x${frameHeight} view=${canvasWidth}x${canvasHeight} " +
+                            "swap=$shouldSwap s=${"%.4f".format(fit.scale)} " +
+                            "ox=${"%.2f".format(fit.offsetX)} oy=${"%.2f".format(fit.offsetY)} " +
+                            "boxN=[${"%.3f".format(detection.left)},${"%.3f".format(detection.top)} " +
+                            "${"%.3f".format(detection.right)},${"%.3f".format(detection.bottom)}] " +
+                            "boxP=[${"%.1f".format(left)},${"%.1f".format(top)} " +
+                            "${"%.1f".format(right)},${"%.1f".format(bottom)}]"
+                    )
+                }
+            }
 
             // Validate coordinates
             if (left < right && top < bottom) {
@@ -180,6 +211,8 @@ private fun fitCenterTransform(viewW: Float, viewH: Float, srcW: Float, srcH: Fl
 
 private const val CONFIDENCE_HIGH = 0.75f
 private const val CONFIDENCE_MED = 0.55f
+private const val DEBUG_OVERLAY = true
+private const val TAG = "DetectionOverlay"
 
 private fun confidenceColor(score: Float): Color {
     return when {
