@@ -32,17 +32,24 @@ class CameraStreamer(private val hub: FrameHub) {
         lastFrameMs = now
 
         try {
-            val bmp = imageProxy.toBitmap() ?: return
+            val raw = imageProxy.toBitmap() ?: return
+            val degrees = imageProxy.imageInfo.rotationDegrees
+            val bmp = if (degrees != 0) rotateBitmap(raw, degrees) else raw
             hub.publish(
                 FrameData(
                     bitmap = bmp,
-                    rotationDegrees = imageProxy.imageInfo.rotationDegrees,
+                    rotationDegrees = 0, // rotation already baked in
                     timestampNs = imageProxy.imageInfo.timestamp
                 )
             )
         } finally {
             imageProxy.close()
         }
+    }
+
+    private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
+        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     @androidx.camera.core.ExperimentalGetImage
