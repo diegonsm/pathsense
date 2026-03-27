@@ -3,16 +3,19 @@ package com.example.pathsense.pipelines
 import android.content.Context
 import android.graphics.Bitmap
 import com.example.pathsense.core.FrameHub
+import com.example.pathsense.core.FrameTarget
 import com.example.pathsense.pipelines.depth.DepthAnythingRunner
 import com.example.pathsense.pipelines.detection.MobileNetSsdRunner
 import com.example.pathsense.pipelines.ocr.OcrPipeline
 import com.example.pathsense.pipelines.results.DetectionResult
 import com.example.pathsense.pipelines.results.DepthResult
 import com.example.pathsense.pipelines.results.OcrResult
+import com.example.pathsense.ui.components.AppMode
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Coordinates all ML pipelines (OCR, object detection, depth estimation).
@@ -45,6 +48,11 @@ class PipelineCoordinator(
 
     private var started = false
 
+    @Volatile
+    private var currentMode: AppMode = AppMode.SCENE
+    private val modeToken = AtomicInteger(0)
+    private val pipelineJobs = mutableListOf<Job>()
+
     // Depth is DISABLED by default due to potential native crashes on some devices
     // The app works fully with Explore (detection) and Text (OCR) modes without depth
     private var depthEnabled = false
@@ -72,37 +80,51 @@ class PipelineCoordinator(
                 }
             }
 
+            refreshTargets()
+
             // OCR pipeline
-            launch(Dispatchers.Default) {
+            val ocrJob = launch(Dispatchers.Default) {
                 for (frame in hub.ocrFrames) {
+                    if (!shouldRunOcr()) continue
+                    val tokenBefore = modeToken.get()
                     try {
-                        _ocrState.value = ocr.run(frame)
+                        val result = ocr.run(frame)
+                        if (tokenBefore != modeToken.get()) continue
+                        _ocrState.value = result
                     } catch (_: Throwable) {}
                 }
             }
+            pipelineJobs.add(ocrJob)
 
             // Object detection pipeline
-            launch(Dispatchers.Default) {
+            val detJob = launch(Dispatchers.Default) {
                 for (frame in hub.detFrames) {
+                    if (!shouldRunDetection()) continue
+                    val tokenBefore = modeToken.get()
                     try {
                         val dets = det.run(frame.bitmap)
+                        if (tokenBefore != modeToken.get()) continue
                         _detState.value = DetectionResult(frame.timestampNs, dets)
                     } catch (_: Throwable) {}
                 }
             }
+            pipelineJobs.add(detJob)
 
             // Depth estimation pipeline — runs if model loaded successfully
             if (depthEnabled) {
-                launch(Dispatchers.Default) {
+                val depthJob = launch(Dispatchers.Default) {
                     var lastDepthMs = 0L
 
                     for (frame in hub.depthFrames) {
+                        if (!shouldRunDepth()) continue
+                        val tokenBefore = modeToken.get()
                         val nowMs = android.os.SystemClock.elapsedRealtime()
                         if (nowMs - lastDepthMs < 1000) continue // ~1 FPS
                         lastDepthMs = nowMs
 
                         try {
                             val map = depth.run(frame.bitmap)
+                            if (tokenBefore != modeToken.get()) continue
                             _depthMapState.value = map
 
                             val viz = map?.let { depth.toGrayscaleBitmap(it) }
@@ -113,18 +135,71 @@ class PipelineCoordinator(
                         } catch (e: Throwable) {
                             android.util.Log.e("PipelineCoordinator", "Depth inference failed", e)
                             depthEnabled = false
+                            _depthState.value = null
+                            _depthMapState.value = null
+                            refreshTargets()
                             break
                         }
                     }
                 }
+                pipelineJobs.add(depthJob)
             }
         }
     }
 
+    fun setMode(mode: AppMode, force: Boolean = false) {
+        if (!force && mode == currentMode) return
+        currentMode = mode
+        modeToken.incrementAndGet()
+
+        refreshTargets()
+
+        // Clear stale pipeline results when switching modes
+        if (!modeNeedsOcr(mode)) {
+            _ocrState.value = null
+        }
+        if (!modeNeedsDetection(mode)) {
+            _detState.value = null
+        }
+        if (!modeNeedsDepth(mode)) {
+            _depthState.value = null
+            _depthMapState.value = null
+        }
+    }
+
     fun stop() {
+        pipelineJobs.forEach { it.cancel() }
+        pipelineJobs.clear()
         hub.close()
         ocr.close()
         det.close()
         depth.close()
+    }
+
+    private fun shouldRunOcr(): Boolean = modeNeedsOcr(currentMode)
+
+    private fun shouldRunDetection(): Boolean = modeNeedsDetection(currentMode)
+
+    private fun shouldRunDepth(): Boolean = modeNeedsDepth(currentMode)
+
+    private fun modeNeedsOcr(mode: AppMode): Boolean =
+        mode == AppMode.READ || mode == AppMode.ALL
+
+    private fun modeNeedsDetection(mode: AppMode): Boolean =
+        mode == AppMode.SCENE || mode == AppMode.NAVIGATE || mode == AppMode.ALL
+
+    private fun modeNeedsDepth(mode: AppMode): Boolean =
+        (mode == AppMode.SCENE || mode == AppMode.NAVIGATE || mode == AppMode.ALL) && depthEnabled
+
+    private fun enabledTargetsFor(mode: AppMode): Set<FrameTarget> {
+        val targets = mutableSetOf<FrameTarget>()
+        if (modeNeedsOcr(mode)) targets.add(FrameTarget.OCR)
+        if (modeNeedsDetection(mode)) targets.add(FrameTarget.DETECTION)
+        if (modeNeedsDepth(mode)) targets.add(FrameTarget.DEPTH)
+        return targets
+    }
+
+    private fun refreshTargets() {
+        hub.setEnabledTargets(enabledTargetsFor(currentMode))
     }
 }
