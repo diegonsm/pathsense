@@ -54,10 +54,11 @@ class DepthSampler {
 
     /**
      * Sample depth map at a detection's bounding box.
-     * Returns the maximum closeness value within the box (closest point).
+     * Returns the average closeness within the box — less sensitive to specular
+     * highlights or single bright pixels that would otherwise always read as NEAR.
      */
     fun sampleDetection(depthMap: DepthAnythingRunner.DepthMap, detection: Detection): Int {
-        return sampleRegion(
+        return sampleRegionAverage(
             depthMap,
             detection.left,
             detection.top,
@@ -198,7 +199,7 @@ class DepthSampler {
 
         val x1 = (left * w).toInt().coerceIn(0, w - 1)
         val y1 = (top * h).toInt().coerceIn(0, h - 1)
-        val x2 = (right * w).toInt().coerceIn(0, h - 1)
+        val x2 = (right * w).toInt().coerceIn(0, w - 1)
         val y2 = (bottom * h).toInt().coerceIn(0, h - 1)
 
         var sum = 0L

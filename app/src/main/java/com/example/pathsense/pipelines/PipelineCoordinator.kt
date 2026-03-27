@@ -62,9 +62,6 @@ class PipelineCoordinator(
                     android.util.Log.e("PipelineCoordinator", "Failed to load detection model", e)
                 }
 
-                // Depth model loading is disabled by default
-                // Uncomment the block below to enable depth (may crash on some devices)
-                /*
                 try {
                     depth.load()
                     depthEnabled = true
@@ -73,7 +70,6 @@ class PipelineCoordinator(
                     android.util.Log.e("PipelineCoordinator", "Failed to load depth model", e)
                     depthEnabled = false
                 }
-                */
             }
 
             // OCR pipeline
@@ -95,8 +91,7 @@ class PipelineCoordinator(
                 }
             }
 
-            // Depth estimation pipeline - DISABLED by default
-            // Only runs if depthEnabled is manually set to true above
+            // Depth estimation pipeline — runs if model loaded successfully
             if (depthEnabled) {
                 launch(Dispatchers.Default) {
                     var lastDepthMs = 0L

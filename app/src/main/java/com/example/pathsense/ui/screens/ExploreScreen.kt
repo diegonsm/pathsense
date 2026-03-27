@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,7 +52,10 @@ fun ExploreScreen(
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
 
-    // Track last announced detection to avoid repetition
+    // Per-label cooldown: tracks when each label was last announced (ms)
+    val labelCooldowns = remember { mutableStateMapOf<String, Long>() }
+    val labelCooldownMs = 7_000L
+
     var lastAnnouncement by remember { mutableStateOf("") }
     var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
 
@@ -71,24 +75,29 @@ fun ExploreScreen(
     LaunchedEffect(enrichedDetections) {
         if (enrichedDetections.isEmpty()) return@LaunchedEffect
 
-        // Get spatial descriptions
-        val descriptions = spatialDescriber.describeDetections(
+        val now = System.currentTimeMillis()
+
+        // Get spatial descriptions, then filter out labels announced within the cooldown window
+        val allDescriptions = spatialDescriber.describeDetections(
             detections = enrichedDetections,
             labelProvider = ::cocoLabel
         )
+        val readyDescriptions = allDescriptions.filter { desc ->
+            val lastSpoken = labelCooldowns[desc.label] ?: 0L
+            now - lastSpoken >= labelCooldownMs
+        }
 
-        if (descriptions.isEmpty()) return@LaunchedEffect
+        if (readyDescriptions.isEmpty()) return@LaunchedEffect
 
-        // Generate announcement
-        val announcement = spatialDescriber.generateSummaryAnnouncement(descriptions)
+        val announcement = spatialDescriber.generateSummaryAnnouncement(readyDescriptions)
 
-        // Only announce if different from last announcement (debouncing handled by AudioFeedbackManager)
         if (announcement != lastAnnouncement) {
             lastAnnouncement = announcement
+            // Record cooldown for every label included in this announcement
+            readyDescriptions.forEach { labelCooldowns[it.label] = now }
             audioManager.announce(announcement)
 
-            // Haptic feedback based on closest proximity
-            val closestProximity = descriptions.firstOrNull()?.proximity
+            val closestProximity = readyDescriptions.firstOrNull()?.proximity
             when (closestProximity) {
                 Proximity.NEAR -> hapticManager.trigger(HapticPattern.PROXIMITY_NEAR)
                 Proximity.MED -> hapticManager.trigger(HapticPattern.PROXIMITY_MEDIUM)
@@ -97,10 +106,12 @@ fun ExploreScreen(
         }
     }
 
-    // Periodic cleanup of audio manager debounce cache
+    // Periodically evict expired cooldowns so the map doesn't grow unbounded
     LaunchedEffect(Unit) {
         while (true) {
-            delay(10000)
+            delay(15_000)
+            val now = System.currentTimeMillis()
+            labelCooldowns.entries.removeAll { (_, ts) -> now - ts >= labelCooldownMs }
             audioManager.cleanupDebounceCache()
         }
     }
