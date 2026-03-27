@@ -187,9 +187,11 @@ class MobileNetSsdRunner(private val context: Context) {
     }
 
     /**
-     * Non-Maximum Suppression: removes duplicate boxes for the same class.
-     * Keeps the highest-confidence box and suppresses any same-class box
-     * with IoU above the threshold.
+     * Two-stage Non-Maximum Suppression:
+     * 1. Same-class pass (IoU > 0.45): removes duplicate boxes for the same label.
+     * 2. Cross-class pass (IoU > 0.65): removes boxes of different classes that
+     *    heavily overlap the same physical object (e.g. chair vs couch, oven vs microwave).
+     *    Higher threshold ensures genuinely nearby different objects are never suppressed.
      */
     private fun nms(
         detections: List<Detection>,
@@ -199,17 +201,26 @@ class MobileNetSsdRunner(private val context: Context) {
         val sorted = detections.sortedByDescending { it.score }.toMutableList()
         val kept = mutableListOf<Detection>()
 
+        // Stage 1: same-class suppression
         while (sorted.isNotEmpty()) {
             val best = sorted.removeAt(0)
             kept.add(best)
             if (kept.size >= maxResults) break
-
             sorted.removeAll { candidate ->
                 candidate.classId == best.classId && iou(best, candidate) > iouThreshold
             }
         }
 
-        return kept
+        // Stage 2: cross-class suppression for heavily overlapping boxes
+        val crossKept = mutableListOf<Detection>()
+        for (detection in kept) {
+            val suppressedByExisting = crossKept.any { existing ->
+                existing.classId != detection.classId && iou(existing, detection) > 0.65f
+            }
+            if (!suppressedByExisting) crossKept.add(detection)
+        }
+
+        return crossKept
     }
 
     private fun iou(a: Detection, b: Detection): Float {
