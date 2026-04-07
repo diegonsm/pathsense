@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -185,12 +187,13 @@ fun TextScreen(
                     }
                 }
 
-                // Action buttons
+                // Action buttons — fixed height row so all buttons are identical in size
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .height(52.dp)
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Restabilize button — clears current OCR state so next frame is treated as fresh
                     AccessibleButton(
@@ -205,12 +208,12 @@ fun TextScreen(
                         style = AccessibleButtonStyle.TONAL,
                         enabled = true,
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
 
-                    // Read Again button
+                    // Repeat button
                     AccessibleButton(
-                        text = "Read Again",
+                        text = "Repeat",
                         onClick = {
                             if (currentText.isNotEmpty()) {
                                 audioManager.stop()
@@ -222,7 +225,7 @@ fun TextScreen(
                         style = AccessibleButtonStyle.FILLED,
                         enabled = currentText.isNotEmpty(),
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
 
                     // Copy button
@@ -239,7 +242,7 @@ fun TextScreen(
                         style = AccessibleButtonStyle.TONAL,
                         enabled = currentText.isNotEmpty(),
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
             }

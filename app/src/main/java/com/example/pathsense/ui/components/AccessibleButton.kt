@@ -1,8 +1,10 @@
 package com.example.pathsense.ui.components
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
@@ -81,11 +83,9 @@ fun AccessibleButton(
                 contentDescription = null,
                 modifier = Modifier.size(18.dp)
             )
+            Spacer(modifier = Modifier.width(6.dp))
         }
-        Text(
-            text = text,
-            modifier = if (icon != null) Modifier else Modifier
-        )
+        Text(text = text)
     }
 
     when (style) {
@@ -95,7 +95,7 @@ fun AccessibleButton(
                 modifier = buttonModifier,
                 enabled = enabled,
                 colors = colors ?: ButtonDefaults.buttonColors(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 content()
             }
@@ -106,7 +106,7 @@ fun AccessibleButton(
                 modifier = buttonModifier,
                 enabled = enabled,
                 colors = colors ?: ButtonDefaults.filledTonalButtonColors(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 content()
             }
@@ -117,7 +117,7 @@ fun AccessibleButton(
                 modifier = buttonModifier,
                 enabled = enabled,
                 colors = colors ?: ButtonDefaults.outlinedButtonColors(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 content()
             }
@@ -128,7 +128,7 @@ fun AccessibleButton(
                 modifier = buttonModifier,
                 enabled = enabled,
                 colors = colors ?: ButtonDefaults.textButtonColors(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 content()
             }
