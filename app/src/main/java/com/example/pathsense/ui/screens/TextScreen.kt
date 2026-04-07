@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,59 +92,51 @@ fun TextScreen(
     val backgroundColor = if (highContrast) Color.Black else MaterialTheme.colorScheme.surface
     val textColor = if (highContrast) Color.Yellow else MaterialTheme.colorScheme.onSurface
 
-    // Text display area with camera preview
-    Column(
-        modifier = modifier.fillMaxSize()
-    ) {
-        // Camera takes upper portion
-        Box(
+    // Full-screen camera with compact text panel overlay at the bottom
+    Box(modifier = modifier.fillMaxSize()) {
+        // Camera fills the entire screen (consistent with other tabs)
+        CameraViewWithOverlay(
+            previewView = previewView,
+            showBoundingBoxes = false,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Mode indicator
+        ModeIndicator(
+            modeName = "Text",
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.5f)
-        ) {
-            CameraViewWithOverlay(
-                previewView = previewView,
-                showBoundingBoxes = false,
-                modifier = Modifier.fillMaxSize()
-            )
+                .align(Alignment.TopStart)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
 
-            // Mode indicator
-            ModeIndicator(
-                modeName = "Text",
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp),
-                highContrast = highContrast
-            )
+        // Speaking indicator
+        SpeakingIndicator(
+            isSpeaking = isSpeaking,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
 
-            // Speaking indicator
-            SpeakingIndicator(
-                isSpeaking = isSpeaking,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp),
-                highContrast = highContrast
-            )
-        }
-
-        // Text display area
+        // Compact text panel anchored to the bottom, sized to its content
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(0.5f),
-            color = backgroundColor,
+                .align(Alignment.BottomCenter),
+            color = backgroundColor.copy(alpha = 0.93f),
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // Detected text (scrollable)
+                // Detected text (scrollable, capped height so it doesn't take over the screen)
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
+                        .heightIn(min = 56.dp, max = 120.dp)
                         .background(
                             color = if (highContrast) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant,
                             shape = RoundedCornerShape(8.dp)
