@@ -38,6 +38,7 @@ import com.example.pathsense.pipelines.results.Proximity
 import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.FeedbackChip
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.NavigationZoneOverlay
 import com.example.pathsense.ui.components.SpeakingIndicator
 import com.example.pathsense.ui.components.ZoneDisplay
@@ -64,6 +65,7 @@ fun NavigateScreen(
     val depthResult by coordinator.depthState.collectAsState(initial = null)
     val detResult by coordinator.detState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Navigation state
     var navigationAnalysis by remember { mutableStateOf<NavigationAnalysis?>(null) }
@@ -197,6 +199,16 @@ fun NavigateScreen(
             isSpeaking = isSpeaking,
             modifier = Modifier
                 .align(Alignment.TopEnd)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
+
+        // Mute button (bottom right)
+        MuteTtsButton(
+            isMuted = isMuted,
+            onToggle = { audioManager.toggleMute() },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .padding(16.dp),
             highContrast = highContrast
         )

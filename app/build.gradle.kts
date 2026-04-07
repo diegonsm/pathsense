@@ -62,7 +62,7 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
     // --- ML Kit Text Recognition ---
-    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     // --- Coroutines (for Channel/Flow + background work) ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
@@ -71,7 +71,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // --- ONNX Runtime (Android) ---
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
 
     // --- DataStore for preferences ---
     implementation("androidx.datastore:datastore-preferences:1.0.0")

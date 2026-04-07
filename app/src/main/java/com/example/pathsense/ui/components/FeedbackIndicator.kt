@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -196,6 +198,47 @@ private fun SpeakingDots(
                     .background(dotColor, CircleShape)
             )
         }
+    }
+}
+
+/**
+ * Mute/unmute TTS button. Displayed as a tappable icon pill.
+ */
+@Composable
+fun MuteTtsButton(
+    isMuted: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    highContrast: Boolean = false
+) {
+    val backgroundColor = if (isMuted) {
+        if (highContrast) Color.Red else Color(0xFFB71C1C)
+    } else {
+        if (highContrast) Color.Black else MaterialTheme.colorScheme.surface
+    }
+    val iconTint = if (isMuted) {
+        Color.White
+    } else {
+        if (highContrast) Color.Yellow else MaterialTheme.colorScheme.onSurface
+    }
+
+    Surface(
+        modifier = modifier
+            .clickable(onClick = onToggle)
+            .semantics {
+                contentDescription = if (isMuted) "Unmute voice" else "Mute voice"
+            },
+        shape = CircleShape,
+        color = backgroundColor.copy(alpha = 0.9f)
+    ) {
+        Icon(
+            imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+            contentDescription = null,
+            modifier = Modifier
+                .padding(8.dp)
+                .size(24.dp),
+            tint = iconTint
+        )
     }
 }
 

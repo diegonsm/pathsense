@@ -31,6 +31,7 @@ import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.DetectionCountIndicator
 import com.example.pathsense.ui.components.FeedbackChip
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 import kotlinx.coroutines.delay
 
@@ -59,6 +60,7 @@ fun AllScreen(
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Per-label spoken state to prevent repeated announcements.
     data class SpokenState(
@@ -231,6 +233,16 @@ fun AllScreen(
             count = enrichedDetections.size,
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
+
+        // Mute button (bottom right)
+        MuteTtsButton(
+            isMuted = isMuted,
+            onToggle = { audioManager.toggleMute() },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .padding(16.dp),
             highContrast = highContrast
         )

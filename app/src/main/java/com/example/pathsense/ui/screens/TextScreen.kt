@@ -45,6 +45,7 @@ import com.example.pathsense.ui.components.AccessibleButton
 import com.example.pathsense.ui.components.AccessibleButtonStyle
 import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 
 /**
@@ -66,6 +67,7 @@ fun TextScreen(
     // Collect OCR results
     val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Collect preferences
     val autoReadText by preferences.autoReadText.collectAsState(initial = true)
@@ -132,6 +134,20 @@ fun TextScreen(
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
+                // Mute button row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    MuteTtsButton(
+                        isMuted = isMuted,
+                        onToggle = { audioManager.toggleMute() },
+                        highContrast = highContrast
+                    )
+                }
+
                 // Detected text (scrollable, capped height so it doesn't take over the screen)
                 Box(
                     modifier = Modifier
