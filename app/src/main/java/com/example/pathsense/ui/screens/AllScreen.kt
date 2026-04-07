@@ -35,6 +35,12 @@ import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 import kotlinx.coroutines.delay
 
+private val CRITICAL_OCR_KEYWORDS = setOf(
+    "stop", "exit", "danger", "fire", "push", "pull",
+    "no entry", "caution", "warning", "emergency", "stairs", "step",
+    "open", "closed"
+)
+
 /**
  * All mode: object detection, OCR, and depth running concurrently.
  *
@@ -176,10 +182,12 @@ fun AllScreen(
         }
     }
 
-    // OCR announcements — only when text is stable and meaningfully long
+    // OCR announcements — read critical keywords always, otherwise require min length
     LaunchedEffect(ocrResult) {
         val text = ocrResult?.text?.trim() ?: return@LaunchedEffect
-        if (text.length > 10 && text != lastOcrText) {
+        val normalized = text.lowercase()
+        val isCritical = CRITICAL_OCR_KEYWORDS.any { normalized.contains(it) }
+        if ((isCritical || text.length >= 5) && text != lastOcrText) {
             lastOcrText = text
             // Only read text if no NEAR obstacle is active
             val hasNearObstacle = enrichedDetections.any { it.proximity == Proximity.NEAR }

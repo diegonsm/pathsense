@@ -83,7 +83,10 @@ fun TextScreen(
             currentText = newText
 
             // Auto-read if enabled and text has changed significantly
-            if (autoReadText && newText != lastAutoReadText && newText.length > 3) {
+            // Normalize before comparing to avoid re-reads from whitespace/case jitter
+            val normalizedNew = newText.trim().replace(Regex("\\s+"), " ").lowercase()
+            val normalizedLast = lastAutoReadText.trim().replace(Regex("\\s+"), " ").lowercase()
+            if (autoReadText && normalizedNew != normalizedLast && newText.length > 3) {
                 lastAutoReadText = newText
                 audioManager.announce(newText, AnnouncementPriority.NORMAL)
                 hapticManager.trigger(HapticPattern.SUCCESS)

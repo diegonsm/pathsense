@@ -12,6 +12,7 @@ import com.example.pathsense.pipelines.results.DepthResult
 import com.example.pathsense.pipelines.results.OcrResult
 import com.example.pathsense.ui.components.AppMode
 import kotlinx.coroutines.*
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,7 +92,11 @@ class PipelineCoordinator(
                         val result = ocr.run(frame)
                         if (tokenBefore != modeToken.get()) continue
                         _ocrState.value = result
-                    } catch (_: Throwable) {}
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        android.util.Log.e("PipelineCoordinator", "OCR failed on frame ${frame.timestampNs}", e)
+                    }
                 }
             }
             pipelineJobs.add(ocrJob)
@@ -110,7 +115,11 @@ class PipelineCoordinator(
                             frameWidth = frame.bitmap.width,
                             frameHeight = frame.bitmap.height
                         )
-                    } catch (_: Throwable) {}
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        android.util.Log.e("PipelineCoordinator", "Detection failed on frame ${frame.timestampNs}", e)
+                    }
                 }
             }
             pipelineJobs.add(detJob)

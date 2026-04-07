@@ -135,14 +135,15 @@ class AudioFeedbackManager(
     ) {
         if (text.isBlank() || _isMuted.value) return
 
-        // Check debouncing
+        // Check debouncing using normalized key so whitespace/case jitter shares the same slot
         if (!bypassDebounce) {
-            val lastTime = recentAnnouncements[text]
+            val key = text.trim().replace(Regex("\\s+"), " ").lowercase()
             val now = System.currentTimeMillis()
+            val lastTime = recentAnnouncements[key]
             if (lastTime != null && (now - lastTime) < debounceTimeMs) {
                 return // Skip - too recent
             }
-            recentAnnouncements[text] = now
+            recentAnnouncements[key] = now
         }
 
         val announcement = Announcement(text, priority)
