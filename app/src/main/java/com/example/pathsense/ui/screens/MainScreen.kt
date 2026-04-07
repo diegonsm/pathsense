@@ -62,6 +62,11 @@ fun MainScreen(
     val spatialDescriber = remember { SpatialDescriber() }
     val depthSampler = remember { DepthSampler() }
 
+    // Initialize mode routing on first composition
+    LaunchedEffect(Unit) {
+        coordinator.setMode(currentMode, force = true)
+    }
+
     // Announce mode changes
     LaunchedEffect(currentMode) {
         hapticManager.trigger(HapticPattern.DOUBLE_TAP)
@@ -97,6 +102,8 @@ fun MainScreen(
                 currentMode = currentMode,
                 onModeSelected = { newMode ->
                     if (newMode != currentMode) {
+                        audioManager.stop()
+                        coordinator.setMode(newMode)
                         currentMode = newMode
                     }
                 },

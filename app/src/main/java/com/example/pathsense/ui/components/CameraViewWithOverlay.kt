@@ -1,18 +1,25 @@
 package com.example.pathsense.ui.components
 
 import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.RectF
+import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -41,7 +48,9 @@ fun CameraViewWithOverlay(
     depthVisualization: Bitmap? = null,
     showDepthVisualization: Boolean = false,
     depthOverlayAlpha: Float = 0.3f,
-    labelProvider: (Int) -> String = { "Object" }
+    labelProvider: (Int) -> String = { "Object" },
+    sourceFrameWidth: Int? = null,
+    sourceFrameHeight: Int? = null
 ) {
     Box(
         modifier = modifier
@@ -72,6 +81,8 @@ fun CameraViewWithOverlay(
             DetectionOverlay(
                 detections = detections,
                 labelProvider = labelProvider,
+                sourceFrameWidth = sourceFrameWidth,
+                sourceFrameHeight = sourceFrameHeight,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -85,8 +96,20 @@ fun CameraViewWithOverlay(
 fun DetectionOverlay(
     detections: List<Detection>,
     labelProvider: (Int) -> String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sourceFrameWidth: Int? = null,
+    sourceFrameHeight: Int? = null
 ) {
+    val lastLogMs = remember { mutableStateOf(0L) }
+    val labelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.WHITE
+            textSize = 34f
+            style = Paint.Style.FILL
+        }
+    }
+
     Canvas(
         modifier = modifier.semantics {
             contentDescription = "${detections.size} objects detected"
@@ -95,15 +118,51 @@ fun DetectionOverlay(
         val canvasWidth = size.width
         val canvasHeight = size.height
 
-        detections.forEach { detection ->
-            // Get color based on proximity
-            val boxColor = getProximityColor(detection.proximity)
+        var frameWidth = (sourceFrameWidth ?: 0).takeIf { it > 0 } ?: canvasWidth.toInt()
+        var frameHeight = (sourceFrameHeight ?: 0).takeIf { it > 0 } ?: canvasHeight.toInt()
 
-            // Convert normalized coordinates to canvas pixels
-            val left = detection.left * canvasWidth
-            val top = detection.top * canvasHeight
-            val right = detection.right * canvasWidth
-            val bottom = detection.bottom * canvasHeight
+        val viewAspect = if (canvasHeight > 0f) canvasWidth / canvasHeight else 0f
+        val frameAspect = if (frameHeight > 0) frameWidth.toFloat() / frameHeight.toFloat() else 0f
+        val swappedAspect = if (frameWidth > 0) frameHeight.toFloat() / frameWidth.toFloat() else 0f
+        val shouldSwap = kotlin.math.abs(frameAspect - viewAspect) > kotlin.math.abs(swappedAspect - viewAspect)
+        if (shouldSwap) {
+            val tmp = frameWidth
+            frameWidth = frameHeight
+            frameHeight = tmp
+        }
+
+        val fit = fitCenterTransform(
+            viewW = canvasWidth,
+            viewH = canvasHeight,
+            srcW = frameWidth.toFloat(),
+            srcH = frameHeight.toFloat()
+        )
+
+        detections.forEachIndexed { index, detection ->
+            val boxColor = confidenceColor(detection.score)
+
+            // Convert normalized coords (source image) to preview coords (fit-center)
+            val left = fit.offsetX + detection.left * fit.scale * frameWidth
+            val top = fit.offsetY + detection.top * fit.scale * frameHeight
+            val right = fit.offsetX + detection.right * fit.scale * frameWidth
+            val bottom = fit.offsetY + detection.bottom * fit.scale * frameHeight
+
+            if (DEBUG_OVERLAY && index == 0) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastLogMs.value > 1000L) {
+                    lastLogMs.value = now
+                    Log.d(
+                        TAG,
+                        "src=${frameWidth}x${frameHeight} view=${canvasWidth}x${canvasHeight} " +
+                            "swap=$shouldSwap s=${"%.4f".format(fit.scale)} " +
+                            "ox=${"%.2f".format(fit.offsetX)} oy=${"%.2f".format(fit.offsetY)} " +
+                            "boxN=[${"%.3f".format(detection.left)},${"%.3f".format(detection.top)} " +
+                            "${"%.3f".format(detection.right)},${"%.3f".format(detection.bottom)}] " +
+                            "boxP=[${"%.1f".format(left)},${"%.1f".format(top)} " +
+                            "${"%.1f".format(right)},${"%.1f".format(bottom)}]"
+                    )
+                }
+            }
 
             // Validate coordinates
             if (left < right && top < bottom) {
@@ -115,12 +174,13 @@ fun DetectionOverlay(
                     style = Stroke(width = 4f)
                 )
 
-                // Draw proximity indicator (corner fill)
-                val cornerSize = 12f
-                drawRect(
-                    color = boxColor,
-                    topLeft = Offset(left, top),
-                    size = Size(cornerSize, cornerSize)
+                val label = "${labelProvider(detection.classId)} ${"%.2f".format(detection.score)}"
+                drawLabel(
+                    label = label,
+                    anchorLeft = left,
+                    anchorTop = top,
+                    boxColor = boxColor,
+                    labelPaint = labelPaint
                 )
             }
         }
@@ -137,6 +197,73 @@ private fun getProximityColor(proximity: Proximity): Color {
         Proximity.FAR -> Color.Green
         Proximity.UNKNOWN -> Color(0xFF00FF00) // Default green
     }
+}
+
+private data class FitTransform(val scale: Float, val offsetX: Float, val offsetY: Float)
+
+private fun fitCenterTransform(viewW: Float, viewH: Float, srcW: Float, srcH: Float): FitTransform {
+    if (srcW <= 0f || srcH <= 0f) return FitTransform(1f, 0f, 0f)
+    val scale = minOf(viewW / srcW, viewH / srcH)
+    val offsetX = (viewW - srcW * scale) / 2f
+    val offsetY = (viewH - srcH * scale) / 2f
+    return FitTransform(scale, offsetX, offsetY)
+}
+
+private const val CONFIDENCE_HIGH = 0.75f
+private const val CONFIDENCE_MED = 0.55f
+private const val DEBUG_OVERLAY = true
+private const val TAG = "DetectionOverlay"
+
+private fun confidenceColor(score: Float): Color {
+    return when {
+        score >= CONFIDENCE_HIGH -> Color(0xFF4CAF50) // green
+        score >= CONFIDENCE_MED -> Color(0xFFFF9800) // orange
+        else -> Color(0xFFFFEB3B) // yellow
+    }
+}
+
+private fun DrawScope.drawLabel(
+    label: String,
+    anchorLeft: Float,
+    anchorTop: Float,
+    boxColor: Color,
+    labelPaint: Paint
+) {
+    val padding = 8f
+    val textWidth = labelPaint.measureText(label)
+    val textHeight = labelPaint.fontMetrics.run { bottom - top }
+
+    val preferredTop = anchorTop - textHeight - padding * 2f
+    val labelTop = if (preferredTop >= 0f) preferredTop else anchorTop
+    val labelLeft = anchorLeft.coerceAtLeast(0f)
+
+    val backgroundRect = RectF(
+        labelLeft,
+        labelTop,
+        labelLeft + textWidth + padding * 2f,
+        labelTop + textHeight + padding * 2f
+    )
+
+    drawRoundRect(
+        color = Color.Black.copy(alpha = 0.65f),
+        topLeft = Offset(backgroundRect.left, backgroundRect.top),
+        size = Size(backgroundRect.width(), backgroundRect.height()),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+    )
+
+    drawRect(
+        color = boxColor,
+        topLeft = Offset(backgroundRect.left, backgroundRect.top),
+        size = Size(backgroundRect.width(), backgroundRect.height()),
+        style = Stroke(width = 2f)
+    )
+
+    drawContext.canvas.nativeCanvas.drawText(
+        label,
+        backgroundRect.left + padding,
+        backgroundRect.top + padding - labelPaint.fontMetrics.top,
+        labelPaint
+    )
 }
 
 /**
