@@ -6,8 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +47,7 @@ import com.example.pathsense.ui.components.AccessibleButton
 import com.example.pathsense.ui.components.AccessibleButtonStyle
 import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 
 /**
@@ -65,6 +69,7 @@ fun TextScreen(
     // Collect OCR results
     val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Collect preferences
     val autoReadText by preferences.autoReadText.collectAsState(initial = true)
@@ -80,7 +85,10 @@ fun TextScreen(
             currentText = newText
 
             // Auto-read if enabled and text has changed significantly
-            if (autoReadText && newText != lastAutoReadText && newText.length > 3) {
+            // Normalize before comparing to avoid re-reads from whitespace/case jitter
+            val normalizedNew = newText.trim().replace(Regex("\\s+"), " ").lowercase()
+            val normalizedLast = lastAutoReadText.trim().replace(Regex("\\s+"), " ").lowercase()
+            if (autoReadText && normalizedNew != normalizedLast && newText.length > 3) {
                 lastAutoReadText = newText
                 audioManager.announce(newText, AnnouncementPriority.NORMAL)
                 hapticManager.trigger(HapticPattern.SUCCESS)
@@ -91,59 +99,66 @@ fun TextScreen(
     val backgroundColor = if (highContrast) Color.Black else MaterialTheme.colorScheme.surface
     val textColor = if (highContrast) Color.Yellow else MaterialTheme.colorScheme.onSurface
 
-    // Text display area with camera preview
-    Column(
-        modifier = modifier.fillMaxSize()
-    ) {
-        // Camera takes upper portion
-        Box(
+    // Full-screen camera with compact text panel overlay at the bottom
+    Box(modifier = modifier.fillMaxSize()) {
+        // Camera fills the entire screen (consistent with other tabs)
+        CameraViewWithOverlay(
+            previewView = previewView,
+            showPreview = false,
+            showBoundingBoxes = false,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Mode indicator
+        ModeIndicator(
+            modeName = "Text",
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.5f)
-        ) {
-            CameraViewWithOverlay(
-                previewView = previewView,
-                showBoundingBoxes = false,
-                modifier = Modifier.fillMaxSize()
-            )
+                .align(Alignment.TopStart)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
 
-            // Mode indicator
-            ModeIndicator(
-                modeName = "Text",
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp),
-                highContrast = highContrast
-            )
+        // Speaking indicator
+        SpeakingIndicator(
+            isSpeaking = isSpeaking,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
 
-            // Speaking indicator
-            SpeakingIndicator(
-                isSpeaking = isSpeaking,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp),
-                highContrast = highContrast
-            )
-        }
-
-        // Text display area
+        // Compact text panel anchored to the bottom, sized to its content
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(0.5f),
-            color = backgroundColor,
+                .align(Alignment.BottomCenter),
+            color = backgroundColor.copy(alpha = 0.93f),
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // Detected text (scrollable)
+                // Mute button row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    MuteTtsButton(
+                        isMuted = isMuted,
+                        onToggle = { audioManager.toggleMute() },
+                        highContrast = highContrast
+                    )
+                }
+
+                // Detected text (scrollable, capped height so it doesn't take over the screen)
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
+                        .heightIn(min = 56.dp, max = 120.dp)
                         .background(
                             color = if (highContrast) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant,
                             shape = RoundedCornerShape(8.dp)
@@ -173,12 +188,13 @@ fun TextScreen(
                     }
                 }
 
-                // Action buttons
+                // Action buttons — fixed height row so all buttons are identical in size
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .height(52.dp)
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Restabilize button — clears current OCR state so next frame is treated as fresh
                     AccessibleButton(
@@ -193,12 +209,12 @@ fun TextScreen(
                         style = AccessibleButtonStyle.TONAL,
                         enabled = true,
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
 
-                    // Read Again button
+                    // Repeat button
                     AccessibleButton(
-                        text = "Read Again",
+                        text = "Repeat",
                         onClick = {
                             if (currentText.isNotEmpty()) {
                                 audioManager.stop()
@@ -210,7 +226,7 @@ fun TextScreen(
                         style = AccessibleButtonStyle.FILLED,
                         enabled = currentText.isNotEmpty(),
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
 
                     // Copy button
@@ -227,7 +243,7 @@ fun TextScreen(
                         style = AccessibleButtonStyle.TONAL,
                         enabled = currentText.isNotEmpty(),
                         highContrast = highContrast,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
             }

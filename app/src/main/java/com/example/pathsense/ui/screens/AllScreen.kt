@@ -31,8 +31,15 @@ import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.DetectionCountIndicator
 import com.example.pathsense.ui.components.FeedbackChip
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 import kotlinx.coroutines.delay
+
+private val CRITICAL_OCR_KEYWORDS = setOf(
+    "stop", "exit", "danger", "fire", "push", "pull",
+    "no entry", "caution", "warning", "emergency", "stairs", "step",
+    "open", "closed"
+)
 
 /**
  * All mode: object detection, OCR, and depth running concurrently.
@@ -59,6 +66,7 @@ fun AllScreen(
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val ocrResult by coordinator.ocrState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Per-label spoken state to prevent repeated announcements.
     data class SpokenState(
@@ -174,10 +182,12 @@ fun AllScreen(
         }
     }
 
-    // OCR announcements — only when text is stable and meaningfully long
+    // OCR announcements — read critical keywords always, otherwise require min length
     LaunchedEffect(ocrResult) {
         val text = ocrResult?.text?.trim() ?: return@LaunchedEffect
-        if (text.length > 10 && text != lastOcrText) {
+        val normalized = text.lowercase()
+        val isCritical = CRITICAL_OCR_KEYWORDS.any { normalized.contains(it) }
+        if ((isCritical || text.length >= 5) && text != lastOcrText) {
             lastOcrText = text
             // Only read text if no NEAR obstacle is active
             val hasNearObstacle = enrichedDetections.any { it.proximity == Proximity.NEAR }
@@ -203,6 +213,7 @@ fun AllScreen(
     Box(modifier = modifier.fillMaxSize()) {
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             detections = enrichedDetections,
             showBoundingBoxes = showBoundingBoxes,
             labelProvider = ::cocoLabel,
@@ -231,6 +242,16 @@ fun AllScreen(
             count = enrichedDetections.size,
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
+
+        // Mute button (bottom right)
+        MuteTtsButton(
+            isMuted = isMuted,
+            onToggle = { audioManager.toggleMute() },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .padding(16.dp),
             highContrast = highContrast
         )

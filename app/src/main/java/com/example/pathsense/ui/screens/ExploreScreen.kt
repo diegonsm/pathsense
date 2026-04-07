@@ -30,6 +30,7 @@ import com.example.pathsense.ui.components.CameraViewWithOverlay
 import com.example.pathsense.ui.components.DetectionCountIndicator
 import com.example.pathsense.ui.components.FeedbackChip
 import com.example.pathsense.ui.components.ModeIndicator
+import com.example.pathsense.ui.components.MuteTtsButton
 import com.example.pathsense.ui.components.SpeakingIndicator
 import kotlinx.coroutines.delay
 
@@ -53,6 +54,7 @@ fun SceneScreen(
     val detResult by coordinator.detState.collectAsState(initial = null)
     val depthMap by coordinator.depthMapState.collectAsState(initial = null)
     val isSpeaking by audioManager.isSpeaking.collectAsState()
+    val isMuted by audioManager.isMuted.collectAsState()
 
     // Per-label spoken state to prevent repeated announcements.
     data class SpokenState(
@@ -151,6 +153,7 @@ fun SceneScreen(
         // Camera with detection overlay
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             detections = enrichedDetections,
             showBoundingBoxes = showBoundingBoxes,
             labelProvider = ::cocoLabel,
@@ -182,6 +185,16 @@ fun SceneScreen(
             count = enrichedDetections.size,
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .padding(16.dp),
+            highContrast = highContrast
+        )
+
+        // Mute button (bottom right)
+        MuteTtsButton(
+            isMuted = isMuted,
+            onToggle = { audioManager.toggleMute() },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .padding(16.dp),
             highContrast = highContrast
         )

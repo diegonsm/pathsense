@@ -52,6 +52,9 @@ class AudioFeedbackManager(
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val _isMuted = MutableStateFlow(false)
+    val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
+
     private val announcementQueue = PriorityQueue<Announcement>()
     private val recentAnnouncements = mutableMapOf<String, Long>()
 
@@ -117,21 +120,30 @@ class AudioFeedbackManager(
      * @param priority The priority level (default: NORMAL)
      * @param bypassDebounce If true, ignores debouncing for this announcement
      */
+    /**
+     * Toggle mute on/off. When muting, stops current speech immediately.
+     */
+    fun toggleMute() {
+        _isMuted.value = !_isMuted.value
+        if (_isMuted.value) stop()
+    }
+
     fun announce(
         text: String,
         priority: AnnouncementPriority = AnnouncementPriority.NORMAL,
         bypassDebounce: Boolean = false
     ) {
-        if (text.isBlank()) return
+        if (text.isBlank() || _isMuted.value) return
 
-        // Check debouncing
+        // Check debouncing using normalized key so whitespace/case jitter shares the same slot
         if (!bypassDebounce) {
-            val lastTime = recentAnnouncements[text]
+            val key = text.trim().replace(Regex("\\s+"), " ").lowercase()
             val now = System.currentTimeMillis()
+            val lastTime = recentAnnouncements[key]
             if (lastTime != null && (now - lastTime) < debounceTimeMs) {
                 return // Skip - too recent
             }
-            recentAnnouncements[text] = now
+            recentAnnouncements[key] = now
         }
 
         val announcement = Announcement(text, priority)

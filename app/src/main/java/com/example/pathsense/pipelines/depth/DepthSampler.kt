@@ -94,7 +94,9 @@ class DepthSampler {
      */
     fun sampleNavigationZones(depthMap: DepthAnythingRunner.DepthMap): List<NavigationZoneResult> {
         return ZONE_CONFIGS.map { config ->
-            val closeness = sampleRegion(
+            // Use average sampling for accuracy — max sampling triggers NEAR from a single
+            // bright pixel, causing frequent false alerts. Average is more robust.
+            val closeness = sampleRegionAverage(
                 depthMap,
                 config.left,
                 config.top,

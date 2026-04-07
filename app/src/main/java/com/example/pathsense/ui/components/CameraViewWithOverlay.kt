@@ -27,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.pathsense.pipelines.results.Detection
 import com.example.pathsense.pipelines.results.Proximity
 
+
 /**
  * Camera preview with optional overlays for detections and depth visualization.
  *
@@ -43,6 +44,7 @@ import com.example.pathsense.pipelines.results.Proximity
 fun CameraViewWithOverlay(
     previewView: PreviewView,
     modifier: Modifier = Modifier,
+    showPreview: Boolean = true,
     detections: List<Detection> = emptyList(),
     showBoundingBoxes: Boolean = true,
     depthVisualization: Bitmap? = null,
@@ -59,11 +61,14 @@ fun CameraViewWithOverlay(
                 contentDescription = "Camera preview"
             }
     ) {
-        // Camera preview
-        AndroidView(
-            factory = { previewView },
-            modifier = Modifier.fillMaxSize()
-        )
+        // Camera preview — only rendered here when the caller hasn't already
+        // placed the PreviewView in a stable parent higher up the hierarchy.
+        if (showPreview) {
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Depth visualization overlay
         if (showDepthVisualization && depthVisualization != null) {
@@ -187,17 +192,6 @@ fun DetectionOverlay(
     }
 }
 
-/**
- * Get color for bounding box based on proximity.
- */
-private fun getProximityColor(proximity: Proximity): Color {
-    return when (proximity) {
-        Proximity.NEAR -> Color.Red
-        Proximity.MED -> Color.Yellow
-        Proximity.FAR -> Color.Green
-        Proximity.UNKNOWN -> Color(0xFF00FF00) // Default green
-    }
-}
 
 private data class FitTransform(val scale: Float, val offsetX: Float, val offsetY: Float)
 
@@ -321,53 +315,71 @@ data class TextRegion(
 
 /**
  * Navigation zone overlay for depth-based navigation.
- * Shows a 3x3 grid with color-coded proximity indicators.
+ * Shows a color-coded grid where:
+ *   Red    = obstacle very close in this zone
+ *   Orange = obstacle at medium distance
+ *   Yellow = obstacle far ahead
+ *   Green  = zone is clear
+ *
+ * @param zones List of zone displays (size must equal gridColumns × gridRows)
+ * @param gridColumns Number of columns in the grid (default 5)
+ * @param modifier Modifier for the component
  */
 @Composable
 fun NavigationZoneOverlay(
     zones: List<ZoneDisplay>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    gridColumns: Int = 5
 ) {
+    if (zones.isEmpty()) return
+    val gridRows = (zones.size + gridColumns - 1) / gridColumns
+
     Canvas(
         modifier = modifier.semantics {
-            val nearCount = zones.count { it.proximity == Proximity.NEAR }
-            contentDescription = if (nearCount > 0) {
-                "$nearCount obstacle zones nearby"
-            } else {
-                "Path appears clear"
-            }
+            val nearCount = zones.count { it.closeness >= 200 }
+            contentDescription = if (nearCount > 0) "$nearCount zones with close obstacles"
+                                  else "Path appears clear"
         }
     ) {
-        val canvasWidth = size.width
-        val canvasHeight = size.height
-        val cellWidth = canvasWidth / 3f
-        val cellHeight = canvasHeight / 3f
+        val cellW = size.width / gridColumns
+        val cellH = size.height / gridRows
 
         zones.forEachIndexed { index, zone ->
-            val col = index % 3
-            val row = index / 3
+            val col = index % gridColumns
+            val row = index / gridColumns
+            val left = col * cellW
+            val top = row * cellH
 
-            val left = col * cellWidth
-            val top = row * cellHeight
+            val fillColor = zoneDepthColor(zone.closeness)
+            val isDanger = zone.closeness >= 100  // MED or NEAR
 
-            val color = getProximityColor(zone.proximity).copy(alpha = 0.4f)
-
-            // Fill zone with proximity color
+            // Filled background
             drawRect(
-                color = color,
+                color = fillColor.copy(alpha = 0.30f),
                 topLeft = Offset(left, top),
-                size = Size(cellWidth, cellHeight)
+                size = Size(cellW, cellH)
             )
 
-            // Draw zone border
+            // Border — thicker and brighter on danger zones
             drawRect(
-                color = Color.White.copy(alpha = 0.5f),
+                color = fillColor.copy(alpha = if (isDanger) 0.85f else 0.40f),
                 topLeft = Offset(left, top),
-                size = Size(cellWidth, cellHeight),
-                style = Stroke(width = 1f)
+                size = Size(cellW, cellH),
+                style = Stroke(width = if (isDanger) 2.5f else 1f)
             )
         }
     }
+}
+
+/**
+ * Maps a raw closeness value (0-255) to a traffic-light color.
+ * Red = very close obstacle, Green = clear zone.
+ */
+private fun zoneDepthColor(closeness: Int): Color = when {
+    closeness >= 200 -> Color(0xFFE53935)  // Red   — NEAR  (~≤1m)
+    closeness >= 100 -> Color(0xFFFF6F00)  // Orange — MED  (~2-3m)
+    closeness >= 30  -> Color(0xFFFDD835)  // Yellow — FAR  (~4m+)
+    else             -> Color(0xFF43A047)  // Green  — clear
 }
 
 /**
