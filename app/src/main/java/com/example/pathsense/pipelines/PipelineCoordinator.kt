@@ -133,7 +133,7 @@ class PipelineCoordinator(
                         if (!shouldRunDepth()) continue
                         val tokenBefore = modeToken.get()
                         val nowMs = android.os.SystemClock.elapsedRealtime()
-                        if (nowMs - lastDepthMs < 1000) continue // ~1 FPS
+                        if (nowMs - lastDepthMs < 250) continue // ~4 FPS
                         lastDepthMs = nowMs
 
                         try {

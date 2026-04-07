@@ -1,9 +1,17 @@
 package com.example.pathsense.ui.screens
 
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -13,6 +21,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.pathsense.accessibility.AnnouncementPriority
 import com.example.pathsense.accessibility.AudioFeedbackManager
@@ -36,7 +47,7 @@ import com.example.pathsense.ui.components.SpeakingIndicator
 import com.example.pathsense.ui.components.ZoneDisplay
 import kotlinx.coroutines.delay
 
-// Only objects that genuinely block or endanger a pedestrian's path.
+// Navigation-relevant obstacles only — skip cups, TVs, food, etc.
 private val NAVIGATION_OBSTACLES = setOf(
     "person", "car", "truck", "bus", "motorcycle", "bicycle",
     "chair", "bench", "couch", "dining table", "bed",
@@ -48,12 +59,16 @@ private const val MIN_CONFIDENCE = 0.45f
 private const val NEAR_REANNOUNCE_MS = 2_000L
 private const val COOLDOWN_MS = 6_000L
 
+// 5×5 visual grid for smoother depth map display
+private const val VISUAL_GRID_COLS = 5
+private const val VISUAL_GRID_ROWS = 5
+
 /**
  * Navigate mode: real-time navigation guidance for visually impaired users.
  *
  * Outputs actionable spoken instructions ("Move slightly left", "Stop! person ahead")
  * based on object detection + optional depth estimation. Detection always runs;
- * depth enriches proximity information when the model is available.
+ * depth enriches proximity and drives the zone grid overlay.
  */
 @Composable
 fun NavigateScreen(
@@ -74,10 +89,13 @@ fun NavigateScreen(
     val isSpeaking by audioManager.isSpeaking.collectAsState()
     val isMuted by audioManager.isMuted.collectAsState()
 
-    // Derived display state
+    // Display state
     var enrichedDetections by remember { mutableStateOf<List<Detection>>(emptyList()) }
     var navigationAnalysis by remember { mutableStateOf<NavigationAnalysis?>(null) }
     var zoneDisplays by remember { mutableStateOf<List<ZoneDisplay>>(emptyList()) }
+
+    // Zone overlay toggle (in-screen control)
+    var showZoneOverlay by remember { mutableStateOf(true) }
 
     // Announcement throttle state
     var lastInstruction by remember { mutableStateOf("") }
@@ -94,15 +112,30 @@ fun NavigateScreen(
         }
     }
 
-    // ── Effect B: Depth zone analysis (state only, no announcements) ──────────
+    // ── Effect B: Depth zone analysis ────────────────────────────────────────
     LaunchedEffect(depthMap) {
         val depth = depthMap ?: run {
             zoneDisplays = emptyList()
             navigationAnalysis = null
             return@LaunchedEffect
         }
+
+        // 5×5 visual grid — average sampling for noise-free display
+        val cellW = 1f / VISUAL_GRID_COLS
+        val cellH = 1f / VISUAL_GRID_ROWS
+        zoneDisplays = (0 until VISUAL_GRID_ROWS).flatMap { row ->
+            (0 until VISUAL_GRID_COLS).map { col ->
+                val closeness = depthSampler.sampleRegionAverage(
+                    depth,
+                    col * cellW, row * cellH,
+                    (col + 1) * cellW, (row + 1) * cellH
+                )
+                ZoneDisplay(depthSampler.closenessToProximity(closeness), closeness)
+            }
+        }
+
+        // 3×3 guidance zones — still use average for accurate proximity classification
         val zoneResults = depthSampler.sampleNavigationZones(depth)
-        zoneDisplays = zoneResults.map { ZoneDisplay(it.proximity, it.closenessValue) }
         navigationAnalysis = spatialDescriber.analyzeNavigationZones(zoneResults)
     }
 
@@ -131,12 +164,11 @@ fun NavigateScreen(
         }
     }
 
-    // ── Effect D: Force re-announcement for persistent NEAR danger ────────────
+    // ── Effect D: Force re-announcement when danger persists ─────────────────
     LaunchedEffect(Unit) {
         while (true) {
             delay(NEAR_REANNOUNCE_MS)
             if (lastInstructionPriority == AnnouncementPriority.IMMEDIATE) {
-                // Reset timestamp so the next detection frame triggers a fresh announcement
                 lastInstructionMs = 0L
             }
         }
@@ -145,7 +177,6 @@ fun NavigateScreen(
     // ── UI ────────────────────────────────────────────────────────────────────
     Box(modifier = modifier.fillMaxSize()) {
 
-        // Camera preview with bounding boxes and optional depth overlay
         CameraViewWithOverlay(
             previewView = previewView,
             showPreview = false,
@@ -160,10 +191,11 @@ fun NavigateScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Zone proximity grid — only shown when depth model is running
-        if (zoneDisplays.isNotEmpty()) {
+        // 5×5 zone grid — shown when depth is running AND toggle is on
+        if (showZoneOverlay && zoneDisplays.isNotEmpty()) {
             NavigationZoneOverlay(
                 zones = zoneDisplays,
+                gridColumns = VISUAL_GRID_COLS,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -184,6 +216,17 @@ fun NavigateScreen(
             highContrast = highContrast
         )
 
+        // Zone overlay toggle button (bottom left)
+        ZoneToggleButton(
+            isOn = showZoneOverlay,
+            enabled = zoneDisplays.isNotEmpty(), // only show when depth is active
+            onClick = { showZoneOverlay = !showZoneOverlay },
+            highContrast = highContrast,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+        )
+
         MuteTtsButton(
             isMuted = isMuted,
             onToggle = { audioManager.toggleMute() },
@@ -193,7 +236,6 @@ fun NavigateScreen(
             highContrast = highContrast
         )
 
-        // Current guidance instruction shown at the bottom
         FeedbackChip(
             text = lastInstruction.ifEmpty { "Scanning..." },
             isSpeaking = isSpeaking,
@@ -205,11 +247,52 @@ fun NavigateScreen(
     }
 }
 
+// ── Zone toggle button ────────────────────────────────────────────────────────
+
+@Composable
+private fun ZoneToggleButton(
+    isOn: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    highContrast: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (!enabled) return
+
+    val activeColor = if (highContrast) Color.Yellow else MaterialTheme.colorScheme.primary
+    val inactiveColor = if (highContrast) Color.Black else MaterialTheme.colorScheme.surface
+    val iconColor = when {
+        highContrast && isOn -> Color.Black
+        highContrast -> Color.Yellow
+        isOn -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Surface(
+        modifier = modifier
+            .size(40.dp)
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = if (isOn) "Hide zone grid" else "Show zone grid"
+            },
+        shape = CircleShape,
+        color = (if (isOn) activeColor else inactiveColor).copy(alpha = 0.9f)
+    ) {
+        Icon(
+            imageVector = Icons.Default.GridView,
+            contentDescription = null,
+            modifier = Modifier
+                .padding(8.dp)
+                .size(24.dp),
+            tint = iconColor
+        )
+    }
+}
+
+// ── Guidance engine ───────────────────────────────────────────────────────────
+
 /**
- * Builds a single actionable navigation instruction from the available sensor data.
- * Detection is always used; depth enriches proximity when available.
- *
- * Returns a (instruction string, priority) pair.
+ * Builds one actionable navigation instruction from detections + optional depth analysis.
  */
 private fun buildGuidanceInstruction(
     detections: List<Detection>,
@@ -217,36 +300,53 @@ private fun buildGuidanceInstruction(
     spatialDescriber: SpatialDescriber
 ): Pair<String, AnnouncementPriority> {
 
-    // Filter to navigation-relevant obstacles above confidence threshold,
-    // sorted so closest (NEAR) objects come first
     val obstacles = detections
         .filter { cocoLabel(it.classId) in NAVIGATION_OBSTACLES && it.score >= MIN_CONFIDENCE }
         .sortedWith(compareBy { proximityOrder(it.proximity) })
 
-    // If no relevant detections and depth says clear (or unavailable), we're good
     if (obstacles.isEmpty()) {
         return if (navigationAnalysis == null || navigationAnalysis.clearPath) {
             "Path is clear" to AnnouncementPriority.NORMAL
         } else {
-            // Depth sees something but detection didn't classify it — use zone description
             buildDepthOnlyInstruction(navigationAnalysis)
         }
     }
 
-    // Use the highest-priority (closest) obstacle as the primary subject
+    // Check for obstacles on multiple sides — warn user not to move into another hazard
+    val leftBlocked = obstacles.any { (it.left + it.right) / 2f < 0.40f && it.proximity != Proximity.FAR }
+    val rightBlocked = obstacles.any { (it.left + it.right) / 2f > 0.60f && it.proximity != Proximity.FAR }
+    val centerBlocked = obstacles.any {
+        val cx = (it.left + it.right) / 2f
+        cx in 0.33f..0.67f && it.proximity != Proximity.FAR
+    }
+    val nearestProximity = obstacles.first().proximity
+
+    if (leftBlocked && rightBlocked && centerBlocked) {
+        return when (nearestProximity) {
+            Proximity.NEAR -> "Stop! obstacles all around you" to AnnouncementPriority.IMMEDIATE
+            Proximity.MED -> "Slow down, obstacles on all sides" to AnnouncementPriority.HIGH
+            else -> "Multiple obstacles around you" to AnnouncementPriority.NORMAL
+        }
+    }
+
+    if (leftBlocked && rightBlocked) {
+        return when (nearestProximity) {
+            Proximity.NEAR -> "Stop! obstacles left and right" to AnnouncementPriority.IMMEDIATE
+            else -> "Caution, obstacles on both sides" to AnnouncementPriority.HIGH
+        }
+    }
+
     val primary = obstacles.first()
     val label = cocoLabel(primary.classId)
     val centerX = (primary.left + primary.right) / 2f
     val clock = spatialDescriber.getClockPosition(centerX)
-
-    // If depth is available, use depth-confirmed proximity; otherwise use detection-default
     val proximity = primary.proximity
 
     return buildInstruction(label, clock, proximity)
 }
 
 /**
- * Generates instruction text + priority from a named object's position and distance.
+ * Generates actionable instruction text from an object's clock position and proximity.
  */
 private fun buildInstruction(
     label: String,
@@ -284,7 +384,7 @@ private fun buildInstruction(
     clock == ClockPosition.ONE_OCLOCK ->
         "$label slightly right" to AnnouncementPriority.NORMAL
 
-    // ── Far left (9-10 o'clock) ───────────────────────────────────────────────
+    // ── Left (9-10 o'clock) ───────────────────────────────────────────────────
     clock == ClockPosition.TEN_OCLOCK && proximity == Proximity.NEAR ->
         "$label on your left, move right" to AnnouncementPriority.HIGH
 
@@ -297,7 +397,7 @@ private fun buildInstruction(
     clock == ClockPosition.NINE_OCLOCK ->
         "$label at ${clock.description}" to AnnouncementPriority.NORMAL
 
-    // ── Far right (2-3 o'clock) ───────────────────────────────────────────────
+    // ── Right (2-3 o'clock) ───────────────────────────────────────────────────
     clock == ClockPosition.TWO_OCLOCK && proximity == Proximity.NEAR ->
         "$label on your right, move left" to AnnouncementPriority.HIGH
 
@@ -314,13 +414,13 @@ private fun buildInstruction(
 }
 
 /**
- * Fallback when depth sees an obstacle but detection didn't produce a named match.
- * Uses zone description to give directional guidance without a specific label.
+ * Fallback guidance when depth sees an obstacle but detection found no named object.
  */
 private fun buildDepthOnlyInstruction(
     analysis: NavigationAnalysis
 ): Pair<String, AnnouncementPriority> {
-    val obstacle = analysis.primaryObstacle ?: return "Path is clear" to AnnouncementPriority.NORMAL
+    val obstacle = analysis.primaryObstacle
+        ?: return "Path is clear" to AnnouncementPriority.NORMAL
     return when {
         obstacle.proximity == Proximity.NEAR && obstacle.zone == NavigationZone.MIDDLE_CENTER ->
             "Stop! obstacle directly ahead" to AnnouncementPriority.IMMEDIATE
@@ -336,7 +436,6 @@ private fun buildDepthOnlyInstruction(
     }
 }
 
-/** Sorts NEAR first, then MED, FAR, UNKNOWN. */
 private fun proximityOrder(proximity: Proximity): Int = when (proximity) {
     Proximity.NEAR -> 0
     Proximity.MED -> 1
