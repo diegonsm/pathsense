@@ -170,6 +170,7 @@ fun NavigateScreen(
         // Camera with optional depth visualization
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             showBoundingBoxes = false,
             depthVisualization = depthVisualization,
             showDepthVisualization = showDepthVisualization && depthAvailable,

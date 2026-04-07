@@ -104,6 +104,7 @@ fun TextScreen(
         // Camera fills the entire screen (consistent with other tabs)
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             showBoundingBoxes = false,
             modifier = Modifier.fillMaxSize()
         )

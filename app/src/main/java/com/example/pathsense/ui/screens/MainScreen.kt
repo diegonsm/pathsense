@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.pathsense.accessibility.AccessibilityPreferences
 import com.example.pathsense.accessibility.AudioFeedbackManager
 import com.example.pathsense.accessibility.HapticFeedbackManager
@@ -117,6 +118,14 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            // Stable camera preview — lives here permanently so the PreviewView is
+            // never reparented when switching tabs, which would corrupt CameraX's
+            // internal surface transformation and cause zooming/stretching.
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier.fillMaxSize()
+            )
+
             when (currentMode) {
                 AppMode.SCENE -> {
                     SceneScreen(

@@ -27,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.pathsense.pipelines.results.Detection
 import com.example.pathsense.pipelines.results.Proximity
 
+
 /**
  * Camera preview with optional overlays for detections and depth visualization.
  *
@@ -43,6 +44,7 @@ import com.example.pathsense.pipelines.results.Proximity
 fun CameraViewWithOverlay(
     previewView: PreviewView,
     modifier: Modifier = Modifier,
+    showPreview: Boolean = true,
     detections: List<Detection> = emptyList(),
     showBoundingBoxes: Boolean = true,
     depthVisualization: Bitmap? = null,
@@ -59,11 +61,14 @@ fun CameraViewWithOverlay(
                 contentDescription = "Camera preview"
             }
     ) {
-        // Camera preview
-        AndroidView(
-            factory = { previewView },
-            modifier = Modifier.fillMaxSize()
-        )
+        // Camera preview — only rendered here when the caller hasn't already
+        // placed the PreviewView in a stable parent higher up the hierarchy.
+        if (showPreview) {
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Depth visualization overlay
         if (showDepthVisualization && depthVisualization != null) {

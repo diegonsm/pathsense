@@ -153,6 +153,7 @@ fun SceneScreen(
         // Camera with detection overlay
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             detections = enrichedDetections,
             showBoundingBoxes = showBoundingBoxes,
             labelProvider = ::cocoLabel,

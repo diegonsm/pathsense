@@ -213,6 +213,7 @@ fun AllScreen(
     Box(modifier = modifier.fillMaxSize()) {
         CameraViewWithOverlay(
             previewView = previewView,
+            showPreview = false,
             detections = enrichedDetections,
             showBoundingBoxes = showBoundingBoxes,
             labelProvider = ::cocoLabel,
