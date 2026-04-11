@@ -260,6 +260,111 @@ class SpatialDescriberTest {
         assertEquals("Clear path ahead", analysis.toSpokenText())
     }
 
+    // Tier Priority Tests
+    //
+    // The sort order is: tier → proximity → confidence. Tier beats proximity, so
+    // a distant person must be announced before a nearby chair. These tests exist
+    // because an earlier version sorted only by proximity+confidence, which caused
+    // safety-critical objects (people, vehicles) to be buried behind furniture.
+
+    @Test
+    fun `tier 0 person beats tier 2 chair even when chair is closer`() {
+        val detections = listOf(
+            // Chair is NEAR — normally top priority under proximity sort
+            Detection(62, 0.95f, 0.4f, 0.4f, 0.6f, 0.6f, Proximity.NEAR),
+            // Person is FAR — but tier 0 wins
+            Detection(1, 0.70f, 0.1f, 0.1f, 0.3f, 0.3f, Proximity.FAR)
+        )
+
+        val descriptions = describer.describeDetections(detections) { id ->
+            when (id) {
+                1 -> "person"
+                62 -> "chair"
+                else -> "object"
+            }
+        }
+
+        assertEquals("person must be announced first (tier 0)", "person", descriptions[0].label)
+        assertEquals("chair", descriptions[1].label)
+    }
+
+    @Test
+    fun `tier 1 animal beats tier 2 furniture`() {
+        val detections = listOf(
+            Detection(63, 0.90f, 0.4f, 0.4f, 0.6f, 0.6f, Proximity.NEAR),  // couch
+            Detection(18, 0.80f, 0.1f, 0.1f, 0.3f, 0.3f, Proximity.NEAR)   // dog
+        )
+
+        val descriptions = describer.describeDetections(detections) { id ->
+            when (id) {
+                18 -> "dog"
+                63 -> "couch"
+                else -> "object"
+            }
+        }
+
+        assertEquals("dog", descriptions[0].label)
+        assertEquals("couch", descriptions[1].label)
+    }
+
+    @Test
+    fun `tier 0 car beats tier 1 dog`() {
+        val detections = listOf(
+            Detection(18, 0.95f, 0.1f, 0.1f, 0.3f, 0.3f, Proximity.NEAR),  // dog
+            Detection(3, 0.70f, 0.6f, 0.3f, 0.9f, 0.7f, Proximity.NEAR)    // car
+        )
+
+        val descriptions = describer.describeDetections(detections) { id ->
+            when (id) {
+                3 -> "car"
+                18 -> "dog"
+                else -> "object"
+            }
+        }
+
+        assertEquals("car", descriptions[0].label)
+        assertEquals("dog", descriptions[1].label)
+    }
+
+    @Test
+    fun `within same tier proximity decides order`() {
+        // Two tier-0 vehicles: NEAR one should come before FAR one
+        val detections = listOf(
+            Detection(3, 0.95f, 0.6f, 0.3f, 0.9f, 0.7f, Proximity.FAR),    // car (far)
+            Detection(8, 0.70f, 0.1f, 0.3f, 0.4f, 0.7f, Proximity.NEAR)    // truck (near)
+        )
+
+        val descriptions = describer.describeDetections(detections) { id ->
+            when (id) {
+                3 -> "car"
+                8 -> "truck"
+                else -> "object"
+            }
+        }
+
+        assertEquals("truck", descriptions[0].label)
+        assertEquals("car", descriptions[1].label)
+    }
+
+    @Test
+    fun `within same tier and proximity confidence decides order`() {
+        val detections = listOf(
+            Detection(1, 0.60f, 0.1f, 0.3f, 0.3f, 0.7f, Proximity.NEAR),   // person low conf
+            Detection(1, 0.95f, 0.6f, 0.3f, 0.9f, 0.7f, Proximity.NEAR)    // person high conf
+        )
+
+        val descriptions = describer.describeDetections(detections) { "person" }
+
+        assertEquals(0.95f, descriptions[0].confidence, 0.001f)
+        assertEquals(0.60f, descriptions[1].confidence, 0.001f)
+    }
+
+    @Test
+    fun `describeDetections on empty list returns empty`() {
+        val descriptions = describer.describeDetections(emptyList()) { "object" }
+        assertTrue(descriptions.isEmpty())
+    }
+
     @Test
     fun `obstacle in center returns clearPath false`() {
         val zones = listOf(
